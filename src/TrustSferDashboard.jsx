@@ -101,23 +101,31 @@ import {
    states wired into every data surface.
    ════════════════════════════════════════════════════════════════════════════ */
 
-// ── Design tokens ──────────────────────────────────────────────────────────
+// ── Design tokens (light theme) ────────────────────────────────────────────
 const T = {
-  ink0: "#08090b",
-  ink1: "#0f1115",
-  ink2: "#161a20",
-  ink3: "#1f242c",
-  ink4: "#2a313b",
-  ink5: "#3a424d",
-  bone0: "#f4f1ea",
-  bone1: "#c8c4bc",
-  bone2: "#7a766e",
-  bone3: "#4d4944",
-  signal: "#c4ff3f",
-  alert: "#ff5f3c",
-  amber: "#ffb444",
-  azure: "#8db6ff",
-  plum: "#c89cff",
+  ink0: "#f4f2ec",
+  ink1: "#ffffff",
+  ink2: "#efece3",
+  ink3: "#e3dfd4",
+  ink4: "#ccc7b8",
+  ink5: "#a8a394",
+  bone0: "#1b1a14",
+  bone1: "#56524a",
+  bone2: "#8a8678",
+  bone3: "#b4b0a2",
+  signal: "#4f7a1f",
+  alert: "#cf3a1c",
+  amber: "#a9760a",
+  azure: "#2f63d6",
+  plum: "#7a45c4",
+};
+
+const tint = (hex, a) => {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -686,29 +694,29 @@ function Chip({ children, tone = "neutral", className = "", size = "sm" }) {
   const tones = {
     neutral: { bg: T.ink2, fg: T.bone1, border: T.ink3 },
     verified: {
-      bg: "rgba(196,255,63,0.08)",
+      bg: tint(T.signal, 0.1),
       fg: T.signal,
-      border: "rgba(196,255,63,0.25)",
+      border: tint(T.signal, 0.3),
     },
     risk: {
-      bg: "rgba(255,95,60,0.08)",
+      bg: tint(T.alert, 0.1),
       fg: T.alert,
-      border: "rgba(255,95,60,0.25)",
+      border: tint(T.alert, 0.3),
     },
     warn: {
-      bg: "rgba(255,180,68,0.08)",
+      bg: tint(T.amber, 0.12),
       fg: T.amber,
-      border: "rgba(255,180,68,0.25)",
+      border: tint(T.amber, 0.3),
     },
     info: {
-      bg: "rgba(141,182,255,0.08)",
+      bg: tint(T.azure, 0.1),
       fg: T.azure,
-      border: "rgba(141,182,255,0.25)",
+      border: tint(T.azure, 0.3),
     },
     plum: {
-      bg: "rgba(200,156,255,0.08)",
+      bg: tint(T.plum, 0.1),
       fg: T.plum,
-      border: "rgba(200,156,255,0.25)",
+      border: tint(T.plum, 0.3),
     },
   };
   const c = tones[tone] || tones.neutral;
@@ -763,8 +771,8 @@ function ErrorState({ title, hint, onRetry }) {
     <div
       className="flex flex-col items-center justify-center text-center py-12 px-6 border"
       style={{
-        borderColor: "rgba(255,95,60,0.3)",
-        background: "rgba(255,95,60,0.04)",
+        borderColor: tint(T.alert, 0.3),
+        background: tint(T.alert, 0.05),
       }}
       role="alert"
     >
@@ -802,7 +810,7 @@ function Button({
   const variants = {
     primary: { bg: T.signal, fg: T.ink0, bd: T.signal },
     ghost: { bg: "transparent", fg: T.bone0, bd: T.ink4 },
-    danger: { bg: "transparent", fg: T.alert, bd: "rgba(255,95,60,0.4)" },
+    danger: { bg: "transparent", fg: T.alert, bd: tint(T.alert, 0.4) },
     quiet: { bg: "transparent", fg: T.bone1, bd: "transparent" },
   };
   const v = variants[variant] || variants.ghost;
@@ -1160,7 +1168,7 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onCloseMobile }) {
                       style={{
                         color: isActive ? T.bone0 : T.bone1,
                         background: isActive
-                          ? "rgba(196,255,63,0.04)"
+                          ? tint(T.signal, 0.09)
                           : "transparent",
                       }}
                       aria-current={isActive ? "page" : undefined}
@@ -1189,8 +1197,8 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onCloseMobile }) {
                               style={{
                                 background:
                                   m.id === "conflicts"
-                                    ? "rgba(255,95,60,0.12)"
-                                    : "rgba(255,180,68,0.12)",
+                                    ? tint(T.alert, 0.14)
+                                    : tint(T.amber, 0.16),
                                 color:
                                   m.id === "conflicts" ? T.alert : T.amber,
                               }}
@@ -1219,7 +1227,7 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onCloseMobile }) {
               className="mx-2 mb-2 p-3 border"
               style={{
                 borderColor: T.ink3,
-                background: "rgba(196,255,63,0.03)",
+                background: tint(T.signal, 0.07),
               }}
             >
               <div className="flex items-center gap-2 mb-2">
@@ -1308,7 +1316,7 @@ function TopBar({
     <header
       className="sticky top-0 z-30 border-b"
       style={{
-        background: "rgba(15,17,21,0.82)",
+        background: "rgba(255,255,255,0.85)",
         borderColor: T.ink3,
         backdropFilter: "blur(8px)",
         WebkitBackdropFilter: "blur(8px)",
@@ -1534,7 +1542,7 @@ function CommandPalette({ open, onClose, onNavigate, onOpenProject }) {
                     onNavigate(r.id);
                     onClose();
                   }}
-                  className="w-full text-left flex items-center gap-3 px-4 py-2.5 focus:outline-none focus-visible:ts-focus hover:bg-white/[0.02]"
+                  className="w-full text-left flex items-center gap-3 px-4 py-2.5 focus:outline-none focus-visible:ts-focus hover:bg-black/[0.03]"
                   style={{ color: T.bone1 }}
                 >
                   <r.icon size={14} style={{ color: T.bone2 }} aria-hidden="true" />
@@ -1563,7 +1571,7 @@ function CommandPalette({ open, onClose, onNavigate, onOpenProject }) {
                     onOpenProject(r.id);
                     onClose();
                   }}
-                  className="w-full text-left flex items-center gap-3 px-4 py-2.5 focus:outline-none focus-visible:ts-focus hover:bg-white/[0.02]"
+                  className="w-full text-left flex items-center gap-3 px-4 py-2.5 focus:outline-none focus-visible:ts-focus hover:bg-black/[0.03]"
                 >
                   <FolderKanban size={14} style={{ color: T.bone2 }} aria-hidden="true" />
                   <div className="flex-1 min-w-0">
@@ -1820,7 +1828,7 @@ function ProjectDrawer({ projectId, onClose, onNavigate }) {
         <div
           className="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b"
           style={{
-            background: "rgba(15,17,21,0.92)",
+            background: "rgba(255,255,255,0.92)",
             borderColor: T.ink3,
             backdropFilter: "blur(8px)",
           }}
@@ -2642,7 +2650,7 @@ function ProjectsView({ onOpenProject }) {
               {filtered.map((p, i) => (
                 <tr
                   key={p.id}
-                  className="ts-row border-b cursor-pointer focus-within:bg-white/[0.02]"
+                  className="ts-row border-b cursor-pointer focus-within:bg-black/[0.03]"
                   style={{ borderColor: T.ink3 }}
                   onClick={() => onOpenProject(p.id)}
                   tabIndex={0}
@@ -2779,6 +2787,7 @@ function EvidenceView({ onOpenProject }) {
   const [filter, setFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   // Seed
   useEffect(() => {
@@ -2888,8 +2897,36 @@ function EvidenceView({ onOpenProject }) {
             />
           </div>
           <Button iconLeft={Download}>Export CSV</Button>
+          <Button variant="primary" iconLeft={PlusCircle} onClick={() => setUploadOpen(true)}>
+            Submit evidence
+          </Button>
         </div>
       </div>
+      {uploadOpen && (
+        <UploadEvidenceModal
+          onClose={() => setUploadOpen(false)}
+          onComplete={(d) => {
+            setEntries((prev) =>
+              [
+                {
+                  id: `u${Date.now()}`,
+                  kind: d.kind,
+                  actor: d.actor,
+                  pid: d.pid,
+                  country: d.country,
+                  flag: d.flag,
+                  hash: d.cle,
+                  block: d.block,
+                  t: "now",
+                  isNew: true,
+                },
+                ...prev,
+              ].slice(0, 80)
+            );
+            setUploadOpen(false);
+          }}
+        />
+      )}
 
       <div
         className="px-5 md:px-6 py-3 border-b flex items-center gap-1 overflow-x-auto"
@@ -2914,7 +2951,7 @@ function EvidenceView({ onOpenProject }) {
               style={{
                 borderColor: isActive ? T.signal : T.ink3,
                 color: isActive ? T.signal : T.bone2,
-                background: isActive ? "rgba(196,255,63,0.06)" : "transparent",
+                background: isActive ? tint(T.signal, 0.12) : "transparent",
               }}
             >
               {k}
@@ -3883,6 +3920,8 @@ function GeoView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function AuditView({ onOpenProject }) {
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [extra, setExtra] = useState([]);
   const events = useMemo(() => {
     const types = [
       { label: "EVIDENCE", tone: "verified" },
@@ -3917,6 +3956,8 @@ function AuditView({ onOpenProject }) {
     return out;
   }, []);
 
+  const allEvents = [...extra, ...events];
+
   return (
     <Card>
       <CardHeader
@@ -3926,16 +3967,42 @@ function AuditView({ onOpenProject }) {
           <>
             <Button size="xs" iconLeft={Calendar}>Range</Button>
             <Button size="xs" iconLeft={Download}>Export</Button>
+            <Button size="xs" variant="primary" iconLeft={PlusCircle} onClick={() => setUploadOpen(true)}>
+              Log evidence
+            </Button>
           </>
         }
       />
+      {uploadOpen && (
+        <UploadEvidenceModal
+          onClose={() => setUploadOpen(false)}
+          onComplete={(d) => {
+            setExtra((prev) => [
+              {
+                id: `a${Date.now()}`,
+                ts: "just now",
+                pid: d.pid,
+                flag: d.flag,
+                country: d.country,
+                actor: `${d.actor} · field upload`,
+                label: d.kind,
+                tone: d.kind === "EVIDENCE" ? "verified" : d.kind === "PAYMENT" ? "plum" : "info",
+                text: `Anchored ${d.files.length} evidence file${d.files.length === 1 ? "" : "s"} for ${d.milestone} — CLE created and Merkle-batched.`,
+                hash: d.cle,
+              },
+              ...prev,
+            ]);
+            setUploadOpen(false);
+          }}
+        />
+      )}
       <ol className="relative" aria-label="Audit events">
         <span
           aria-hidden="true"
           className="absolute left-[28px] top-0 bottom-0 w-px"
           style={{ background: T.ink3 }}
         />
-        {events.map((e) => (
+        {allEvents.map((e) => (
           <li
             key={e.id}
             className="relative pl-16 pr-5 md:pr-6 py-5 border-b"
@@ -4176,8 +4243,8 @@ function WorkflowStepper({ stage, blocked }) {
                 color: current ? accent : done ? T.bone1 : T.bone3,
                 background: current
                   ? blocked
-                    ? "rgba(255,95,60,0.08)"
-                    : "rgba(196,255,63,0.06)"
+                    ? tint(T.alert, 0.1)
+                    : tint(T.signal, 0.12)
                   : "transparent",
               }}
             >
@@ -4200,10 +4267,13 @@ function WorkflowStepper({ stage, blocked }) {
 
 function ContractsView({ onOpenProject }) {
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const totalValue = CONTRACTS.reduce((s, c) => s + c.value, 0);
-  const active = CONTRACTS.filter((c) => c.status === "active").length;
-  const amendTotal = CONTRACTS.reduce((s, c) => s + c.amendments, 0);
-  const filtered = CONTRACTS.filter(
+  const [newOpen, setNewOpen] = useState(false);
+  const [extra, setExtra] = useState([]);
+  const all = [...extra, ...CONTRACTS];
+  const totalValue = all.reduce((s, c) => s + c.value, 0);
+  const active = all.filter((c) => c.status === "active").length;
+  const amendTotal = all.reduce((s, c) => s + c.amendments, 0);
+  const filtered = all.filter(
     (c) => statusFilter === "ALL" || c.status === statusFilter
   );
   const statusTone = {
@@ -4216,8 +4286,17 @@ function ContractsView({ onOpenProject }) {
 
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      {newOpen && (
+        <NewContractModal
+          onClose={() => setNewOpen(false)}
+          onComplete={(c) => {
+            setExtra((prev) => [c, ...prev]);
+            setNewOpen(false);
+          }}
+        />
+      )}
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
-        <KPI label="Contract value" value={fmtUSD(totalValue)} sublabel={`${CONTRACTS.length} contracts`} />
+        <KPI label="Contract value" value={fmtUSD(totalValue)} sublabel={`${all.length} contracts`} />
         <KPI label="Active contracts" value={active} sublabel="under execution" />
         <KPI label="Amendments" value={amendTotal} delta={3.0} sublabel="cumulative variations" />
         <KPI label="Change orders" value={CHANGE_ORDERS.filter((c) => c.status === "pending").length} sublabel="pending decision" />
@@ -4228,12 +4307,17 @@ function ContractsView({ onOpenProject }) {
           title="Contract registry"
           subtitle="Procurement → award → execution → close-out"
           right={
-            <Select
-              label="Status"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={["ALL", "procurement", "awarded", "active", "amended", "closed"]}
-            />
+            <>
+              <Select
+                label="Status"
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={["ALL", "procurement", "awarded", "active", "amended", "closed"]}
+              />
+              <Button variant="primary" iconLeft={PlusCircle} onClick={() => setNewOpen(true)}>
+                New contract
+              </Button>
+            </>
           }
         />
         <div className="overflow-x-auto">
@@ -4424,16 +4508,29 @@ function WorkflowsView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function SignaturesView({ onOpenProject }) {
-  const pending = SIGNATURES.filter((s) => s.status === "pending").length;
-  const signed = SIGNATURES.filter((s) => s.status === "signed").length;
+  const [sigs, setSigs] = useState(SIGNATURES);
+  const [target, setTarget] = useState(null);
+  const pending = sigs.filter((s) => s.status === "pending").length;
+  const signed = sigs.filter((s) => s.status === "signed").length;
   const statusTone = { pending: "warn", signed: "verified", declined: "risk" };
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      {target && (
+        <SignModal
+          signature={target}
+          onClose={() => setTarget(null)}
+          onComplete={(id, choice) =>
+            setSigs((prev) =>
+              prev.map((s) => (s.id === id ? { ...s, status: choice, when: "just now" } : s))
+            )
+          }
+        />
+      )}
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
         <KPI label="Awaiting signature" value={pending} sublabel="in your sequences" />
         <KPI label="Signed today" value={signed} sublabel="provenance anchored" />
-        <KPI label="Hash-locked docs" value={SIGNATURES.length} sublabel="integrity sealed" />
-        <KPI label="Declined" value={SIGNATURES.filter((s) => s.status === "declined").length} sublabel="returned to origin" />
+        <KPI label="Hash-locked docs" value={sigs.length} sublabel="integrity sealed" />
+        <KPI label="Declined" value={sigs.filter((s) => s.status === "declined").length} sublabel="returned to origin" />
       </div>
 
       <div className="col-span-12" style={{ background: T.ink1 }}>
@@ -4454,7 +4551,7 @@ function SignaturesView({ onOpenProject }) {
               </tr>
             </thead>
             <tbody>
-              {SIGNATURES.map((s) => {
+              {sigs.map((s) => {
                 const p = PROJECTS.find((x) => x.id === s.pid);
                 return (
                   <tr key={s.id} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
@@ -4490,7 +4587,7 @@ function SignaturesView({ onOpenProject }) {
                     </td>
                     <td className="px-4 py-3 align-middle text-right">
                       {s.status === "pending" ? (
-                        <Button size="xs" variant="primary" iconLeft={Stamp} onClick={() => onOpenProject(s.pid)}>
+                        <Button size="xs" variant="primary" iconLeft={Stamp} onClick={() => setTarget(s)}>
                           Sign
                         </Button>
                       ) : (
@@ -4537,7 +4634,7 @@ function LedgerSyncView({ onOpenProject }) {
               <div key={st} className="flex items-center gap-1.5 shrink-0">
                 <div
                   className="px-3 py-2 border text-center"
-                  style={{ borderColor: count ? tone : T.ink3, background: count ? "rgba(255,255,255,0.02)" : "transparent" }}
+                  style={{ borderColor: count ? tone : T.ink3, background: count ? T.ink2 : "transparent" }}
                 >
                   <div className="font-mono text-[9px] tracking-widest uppercase" style={{ color: count ? tone : T.bone3 }}>
                     {st}
@@ -4706,7 +4803,7 @@ function PortalView() {
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
       <div
         className="col-span-12 px-5 md:px-6 py-4 flex flex-wrap items-center gap-3"
-        style={{ background: "rgba(141,182,255,0.05)", border: `1px solid rgba(141,182,255,0.2)` }}
+        style={{ background: tint(T.azure, 0.07), border: `1px solid ${tint(T.azure, 0.25)}` }}
       >
         <Eye size={16} style={{ color: T.azure }} aria-hidden="true" />
         <span className="font-mono text-[11px] tracking-widest uppercase" style={{ color: T.azure }}>
@@ -4902,10 +4999,29 @@ function ReportsView() {
 // ════════════════════════════════════════════════════════════════════════════
 
 function AccessView() {
+  const [onboardOpen, setOnboardOpen] = useState(false);
+  const [invites, setInvites] = useState([]);
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      {onboardOpen && (
+        <OnboardModal
+          onClose={() => setOnboardOpen(false)}
+          onComplete={(inv) => {
+            setInvites((prev) => [inv, ...prev]);
+            setOnboardOpen(false);
+          }}
+        />
+      )}
       <div className="col-span-12" style={{ background: T.ink1 }}>
-        <CardHeader title="Identity types" subtitle="User & identity layer · §6.2" />
+        <CardHeader
+          title="Identity types"
+          subtitle="User & identity layer · §6.2"
+          right={
+            <Button variant="primary" iconLeft={PlusCircle} onClick={() => setOnboardOpen(true)}>
+              Onboard third party
+            </Button>
+          }
+        />
         <ul className="grid grid-cols-1 md:grid-cols-5 gap-px" style={{ background: T.ink3 }}>
           {IDENTITY_TYPES.map((it) => (
             <li key={it.type} className="p-5" style={{ background: T.ink1 }}>
@@ -4919,6 +5035,28 @@ function AccessView() {
           ))}
         </ul>
       </div>
+
+      {invites.length > 0 && (
+        <div className="col-span-12" style={{ background: T.ink1 }}>
+          <CardHeader title="Pending invitations" subtitle="Third parties awaiting activation" />
+          <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+            {invites.map((inv) => (
+              <li key={inv.id} className="px-5 md:px-6 py-3.5 flex flex-col md:flex-row md:items-center gap-3" style={{ borderColor: T.ink3 }}>
+                <Chip size="xs" tone="warn">invited</Chip>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm" style={{ color: T.bone0 }}>{inv.org}</span>
+                  <span className="ml-2 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                    {inv.id} · {inv.type} · {inv.role} · {inv.tier} · {inv.project}
+                  </span>
+                </div>
+                <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                  {inv.email} · sent {inv.sent}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="col-span-12 lg:col-span-7" style={{ background: T.ink1 }}>
         <CardHeader title="Role-based access control" subtitle="RBAC + ABAC · document & milestone level" />
@@ -4998,6 +5136,843 @@ function AccessView() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FLOW PRIMITIVES — Modal, wizard, form fields
+// ════════════════════════════════════════════════════════════════════════════
+
+function Modal({ title, subtitle, icon: Icon, onClose, children, footer, wide }) {
+  const ref = useRef(null);
+  useFocusTrap(ref, true);
+  useKey("Escape", onClose, []);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-10 md:pt-16 px-4 pb-10 overflow-y-auto"
+      style={{ background: "rgba(0,0,0,0.45)" }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+    >
+      <div
+        ref={ref}
+        className={`w-full border ${wide ? "max-w-[780px]" : "max-w-[580px]"}`}
+        style={{ borderColor: T.ink3, background: T.ink1 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 px-5 md:px-6 py-4 border-b" style={{ borderColor: T.ink3 }}>
+          <div className="flex items-center gap-3 min-w-0">
+            {Icon && (
+              <span className="inline-flex items-center justify-center w-9 h-9 border shrink-0" style={{ borderColor: T.signal }}>
+                <Icon size={16} style={{ color: T.signal }} aria-hidden="true" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <h2 className="font-serif text-xl leading-tight" style={{ fontFamily: "Fraunces, serif", fontWeight: 400, color: T.bone0 }}>
+                {title}
+              </h2>
+              {subtitle && (
+                <p className="mt-0.5 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                  {subtitle}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 p-2 border focus:outline-none focus-visible:ts-focus"
+            style={{ borderColor: T.ink3, color: T.bone0 }}
+            aria-label="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="px-5 md:px-6 py-5">{children}</div>
+        {footer && (
+          <div className="px-5 md:px-6 py-4 border-t flex items-center justify-between gap-3" style={{ borderColor: T.ink3 }}>
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StepDots({ steps, current }) {
+  return (
+    <ol className="flex items-center gap-1.5 mb-5">
+      {steps.map((s, i) => (
+        <li key={s} className="flex items-center gap-1.5 flex-1 last:flex-none">
+          <span
+            className="w-5 h-5 shrink-0 flex items-center justify-center font-mono text-[10px] border"
+            style={{
+              borderColor: i <= current ? T.signal : T.ink3,
+              background: i < current ? T.signal : "transparent",
+              color: i < current ? T.ink1 : i === current ? T.signal : T.bone3,
+            }}
+          >
+            {i < current ? "✓" : i + 1}
+          </span>
+          <span
+            className="font-mono text-[9px] tracking-widest uppercase truncate hidden sm:block"
+            style={{ color: i === current ? T.bone0 : T.bone2 }}
+          >
+            {s}
+          </span>
+          {i < steps.length - 1 && <span className="flex-1 h-px" style={{ background: T.ink3 }} aria-hidden="true" />}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Field({ label, children, hint }) {
+  return (
+    <label className="block mb-4">
+      <span className="block font-mono text-[10px] tracking-widest uppercase mb-1.5" style={{ color: T.bone2 }}>
+        {label}
+      </span>
+      {children}
+      {hint && <span className="block mt-1 text-[11px]" style={{ color: T.bone3 }}>{hint}</span>}
+    </label>
+  );
+}
+
+function TextInput(props) {
+  return (
+    <input
+      {...props}
+      className="w-full bg-transparent border outline-none px-3 py-2 text-sm focus:outline-none focus-visible:ts-focus"
+      style={{ borderColor: T.ink3, color: T.bone0 }}
+    />
+  );
+}
+
+function SelectInput({ value, onChange, options }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full border outline-none px-3 py-2 text-sm focus:outline-none focus-visible:ts-focus"
+      style={{ borderColor: T.ink3, color: T.bone0, background: T.ink1 }}
+    >
+      {options.map((o) => {
+        const val = typeof o === "object" ? o.value : o;
+        const lab = typeof o === "object" ? o.label : o;
+        return (
+          <option key={val} value={val} style={{ background: T.ink1, color: T.bone0 }}>
+            {lab}
+          </option>
+        );
+      })}
+    </select>
+  );
+}
+
+function RadioCards({ value, onChange, options }) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {options.map((o) => {
+        const on = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            className="text-left p-3 border focus:outline-none focus-visible:ts-focus"
+            style={{
+              borderColor: on ? T.signal : T.ink3,
+              background: on ? tint(T.signal, 0.08) : "transparent",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              {o.icon && <o.icon size={14} style={{ color: on ? T.signal : T.bone2 }} aria-hidden="true" />}
+              <span className="text-sm" style={{ color: T.bone0 }}>{o.label}</span>
+            </div>
+            {o.desc && <p className="mt-1 text-[11px] leading-snug" style={{ color: T.bone2 }}>{o.desc}</p>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Dropzone({ files, onFiles, sample }) {
+  const inputRef = useRef(null);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="w-full border border-dashed py-7 flex flex-col items-center gap-1.5 focus:outline-none focus-visible:ts-focus"
+        style={{ borderColor: T.ink4, background: T.ink2 }}
+      >
+        <ArrowUp size={20} style={{ color: T.bone2 }} aria-hidden="true" />
+        <span className="text-sm" style={{ color: T.bone1 }}>Click to select files for upload</span>
+        <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone3 }}>
+          JPG · PNG · MP4 · PDF — hashed locally before upload
+        </span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const names = Array.from(e.target.files || []).map((f) => f.name);
+          if (names.length) onFiles(names);
+        }}
+      />
+      <div className="mt-2 flex items-center justify-between">
+        <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+          {files.length} file{files.length === 1 ? "" : "s"} staged
+        </span>
+        {sample && (
+          <Button size="xs" onClick={() => onFiles(sample)}>
+            Use sample set
+          </Button>
+        )}
+      </div>
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {files.map((f, i) => (
+            <li key={f + i} className="flex items-center gap-2 px-2.5 py-1.5 border" style={{ borderColor: T.ink3 }}>
+              <FileText size={12} style={{ color: T.bone2 }} aria-hidden="true" />
+              <span className="text-[12px] flex-1 truncate" style={{ color: T.bone1 }}>{f}</span>
+              <button
+                type="button"
+                onClick={() => onFiles(files.filter((_, idx) => idx !== i))}
+                style={{ color: T.bone2 }}
+                aria-label={`Remove ${f}`}
+                className="focus:outline-none focus-visible:ts-focus"
+              >
+                <X size={11} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FLOW: EVIDENCE UPLOAD & ANCHORING
+// ════════════════════════════════════════════════════════════════════════════
+
+function UploadEvidenceModal({ onClose, onComplete, fixedProject }) {
+  const steps = ["Project", "Files", "Verify", "Anchor"];
+  const [step, setStep] = useState(0);
+  const [pid, setPid] = useState(fixedProject || PROJECTS[0].id);
+  const [milestone, setMilestone] = useState("M-01");
+  const [kind, setKind] = useState("EVIDENCE");
+  const [actor, setActor] = useState("Field Inspector");
+  const [files, setFiles] = useState([]);
+  const [anchored, setAnchored] = useState(false);
+  const reduced = usePrefersReducedMotion();
+
+  const project = PROJECTS.find((p) => p.id === pid);
+  const [lon, lat] = PROJECT_GEO(pid);
+  const eHash = useMemo(() => fauxHash(`evi-${pid}-${files.join(",")}`), [pid, files]);
+  const mHash = useMemo(() => fauxHash(`meta-${pid}-${milestone}-${actor}`), [pid, milestone, actor]);
+  const cle = useMemo(() => fauxHash(`cle-${eHash}-${mHash}`), [eHash, mHash]);
+  const block = useMemo(() => 1284019 + Math.floor(Math.random() * 80), [cle]);
+
+  useEffect(() => {
+    if (step !== 3) {
+      setAnchored(false);
+      return;
+    }
+    if (reduced) {
+      setAnchored(true);
+      return;
+    }
+    const t = setTimeout(() => setAnchored(true), 1500);
+    return () => clearTimeout(t);
+  }, [step, reduced]);
+
+  const canNext = step === 1 ? files.length > 0 : true;
+  const finish = () => {
+    onComplete({
+      pid,
+      kind,
+      actor,
+      milestone,
+      files,
+      cle,
+      country: project.country,
+      flag: project.flag,
+      block,
+    });
+  };
+
+  return (
+    <Modal
+      title="Submit evidence"
+      subtitle="Capture → hash → blockchain anchor"
+      icon={Hash}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={step === 0 ? onClose : () => setStep((s) => s - 1)} iconLeft={ChevronLeft}>
+            {step === 0 ? "Cancel" : "Back"}
+          </Button>
+          {step < 3 ? (
+            <Button variant="primary" iconRight={ArrowRight} onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext}>
+              Continue
+            </Button>
+          ) : (
+            <Button variant="primary" iconRight={BadgeCheck} onClick={finish} disabled={!anchored}>
+              {anchored ? "Finish & record" : "Anchoring…"}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <StepDots steps={steps} current={step} />
+
+      {step === 0 && (
+        <div>
+          <Field label="Project">
+            <SelectInput
+              value={pid}
+              onChange={setPid}
+              options={PROJECTS.map((p) => ({ value: p.id, label: `${p.flag} ${p.name}` }))}
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Milestone">
+              <SelectInput value={milestone} onChange={setMilestone} options={["M-01", "M-02", "M-03", "M-04", "M-05"]} />
+            </Field>
+            <Field label="Evidence kind">
+              <SelectInput value={kind} onChange={setKind} options={["EVIDENCE", "MILESTONE", "PAYMENT", "APPROVAL"]} />
+            </Field>
+          </div>
+          <Field label="Submitting role">
+            <SelectInput value={actor} onChange={setActor} options={["Field Inspector", "Project Engineer", "Contractor", "Auditor"]} />
+          </Field>
+        </div>
+      )}
+
+      {step === 1 && (
+        <div>
+          <p className="text-xs mb-3" style={{ color: T.bone2 }}>
+            Files are SHA-256 hashed in the browser before upload — raw evidence never leaves your device unencrypted.
+          </p>
+          <Dropzone
+            files={files}
+            onFiles={setFiles}
+            sample={["site_photo_01.jpg", "site_photo_02.jpg", "drone_pass_A.mp4", "inspection_report.pdf"]}
+          />
+        </div>
+      )}
+
+      {step === 2 && (
+        <div>
+          <p className="font-mono text-[10px] tracking-widest uppercase mb-3" style={{ color: T.bone2 }}>
+            Auto-captured metadata
+          </p>
+          <div className="border divide-y" style={{ borderColor: T.ink3 }}>
+            {[
+              ["Project", `${project.flag} ${pid}`],
+              ["Milestone", milestone],
+              ["GPS coordinates", `${lat.toFixed(2)}, ${lon.toFixed(2)}`],
+              ["Timestamp", "captured just now · device clock"],
+              ["Device ID", fauxHash(`dev-${actor}`).slice(0, 18)],
+              ["EXIF integrity", "consistent · 0 anomalies"],
+              ["E_HASH", eHash.slice(0, 30) + "…"],
+              ["M_HASH", mHash.slice(0, 30) + "…"],
+            ].map(([k, v]) => (
+              <div key={k} className="px-3 py-2">
+                <MetaRow label={k} value={v} />
+              </div>
+            ))}
+          </div>
+          <div
+            className="mt-3 flex items-center gap-2 px-3 py-2.5 border"
+            style={{ borderColor: tint(T.signal, 0.3), background: tint(T.signal, 0.08) }}
+          >
+            <CheckCircle2 size={14} style={{ color: T.signal }} aria-hidden="true" />
+            <span className="text-xs" style={{ color: T.bone1 }}>
+              Conflict Detection Engine — no spatial, temporal, or evidence-integrity conflict found.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="text-center py-4">
+          {!anchored ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <RefreshCw size={26} className={reduced ? "" : "ts-spin"} style={{ color: T.signal }} aria-hidden="true" />
+              <p className="text-sm" style={{ color: T.bone1 }}>Anchoring Composite Ledger Entry to hybrid chain…</p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3">
+              <span className="inline-flex items-center justify-center w-12 h-12 border" style={{ borderColor: T.signal }}>
+                <BadgeCheck size={24} style={{ color: T.signal }} aria-hidden="true" />
+              </span>
+              <p className="text-sm" style={{ color: T.bone0 }}>Evidence anchored & verified.</p>
+              <div className="w-full border divide-y text-left" style={{ borderColor: T.ink3 }}>
+                {[
+                  ["CLE hash", cle.slice(0, 34) + "…"],
+                  ["Block height", `#${block.toLocaleString()}`],
+                  ["Transaction", fauxHash(`tx-${cle}`).slice(0, 22) + "…"],
+                  ["Files anchored", String(files.length)],
+                ].map(([k, v]) => (
+                  <div key={k} className="px-3 py-2">
+                    <MetaRow label={k} value={v} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FLOW: THIRD-PARTY ONBOARDING
+// ════════════════════════════════════════════════════════════════════════════
+
+const ONBOARD_ROLES = {
+  Contractor: ["Project Engineer", "Compliance Officer"],
+  Inspector: ["Field Inspector", "Third-party Inspector"],
+  Donor: ["Donor Representative"],
+  Auditor: ["Auditor"],
+};
+
+function OnboardModal({ onClose, onComplete }) {
+  const steps = ["Type", "Organization", "Compliance", "Access", "Review"];
+  const [step, setStep] = useState(0);
+  const [type, setType] = useState("Contractor");
+  const [org, setOrg] = useState("");
+  const [country, setCountry] = useState(PROJECTS[0].country);
+  const [contact, setContact] = useState("");
+  const [email, setEmail] = useState("");
+  const [docs, setDocs] = useState([]);
+  const [attest, setAttest] = useState(false);
+  const [tax, setTax] = useState(false);
+  const [role, setRole] = useState(ONBOARD_ROLES.Contractor[0]);
+  const [pid, setPid] = useState(PROJECTS[0].id);
+
+  useEffect(() => {
+    setRole(ONBOARD_ROLES[type][0]);
+  }, [type]);
+
+  const tierFor = (r) =>
+    r === "Donor Representative" || r === "Auditor" ? "L4" : r === "Field Inspector" ? "L2" : "L3";
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  const canNext =
+    step === 1 ? org.trim() && contact.trim() && emailOk : step === 2 ? docs.length > 0 && attest : true;
+
+  const finish = () => {
+    onComplete({
+      id: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
+      type,
+      org,
+      country,
+      contact,
+      email,
+      role,
+      tier: tierFor(role),
+      project: pid,
+      docs: docs.length,
+      status: "invited",
+      sent: "just now",
+    });
+  };
+
+  return (
+    <Modal
+      title="Onboard a third party"
+      subtitle="Invite · KYC · role assignment"
+      icon={UserCog}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button onClick={step === 0 ? onClose : () => setStep((s) => s - 1)} iconLeft={ChevronLeft}>
+            {step === 0 ? "Cancel" : "Back"}
+          </Button>
+          {step < 4 ? (
+            <Button variant="primary" iconRight={ArrowRight} onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext}>
+              Continue
+            </Button>
+          ) : (
+            <Button variant="primary" iconRight={Send} onClick={finish}>
+              Send invitation
+            </Button>
+          )}
+        </>
+      }
+    >
+      <StepDots steps={steps} current={step} />
+
+      {step === 0 && (
+        <div>
+          <p className="text-xs mb-3" style={{ color: T.bone2 }}>
+            Select the class of stakeholder. This sets the verification path and the access tiers available.
+          </p>
+          <RadioCards
+            value={type}
+            onChange={setType}
+            options={[
+              { value: "Contractor", label: "EPC Contractor", icon: HardHat, desc: "Builders, engineers, operators submitting evidence." },
+              { value: "Inspector", label: "Inspector", icon: Eye, desc: "Independent field verification of milestones." },
+              { value: "Donor", label: "Donor", icon: Globe2, desc: "Funding partner with disbursement oversight." },
+              { value: "Auditor", label: "Auditor", icon: FileSearch, desc: "National audit office or third-party assurance." },
+            ]}
+          />
+        </div>
+      )}
+
+      {step === 1 && (
+        <div>
+          <Field label="Organization name">
+            <TextInput value={org} onChange={(e) => setOrg(e.target.value)} placeholder="e.g. Sinohydro Group Ltd" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Country of registration">
+              <SelectInput value={country} onChange={setCountry} options={[...new Set(PROJECTS.map((p) => p.country))]} />
+            </Field>
+            <Field label="Primary contact">
+              <TextInput value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Full name" />
+            </Field>
+          </div>
+          <Field label="Contact email" hint={email && !emailOk ? "Enter a valid email address." : "An invitation link is sent here."}>
+            <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@organization.org" type="email" />
+          </Field>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div>
+          <p className="text-xs mb-3" style={{ color: T.bone2 }}>
+            Upload KYC & compliance documents — company registration, beneficial-ownership, prior-performance records.
+          </p>
+          <Dropzone files={docs} onFiles={setDocs} sample={["company_registration.pdf", "beneficial_ownership.pdf"]} />
+          <div className="mt-4 space-y-2">
+            {[
+              ["Anti-corruption attestation signed", attest, setAttest],
+              ["Tax clearance certificate provided", tax, setTax],
+            ].map(([lab, val, set]) => (
+              <button
+                key={lab}
+                type="button"
+                onClick={() => set(!val)}
+                className="w-full flex items-center gap-2.5 px-3 py-2 border text-left focus:outline-none focus-visible:ts-focus"
+                style={{ borderColor: val ? tint(T.signal, 0.4) : T.ink3 }}
+              >
+                <span
+                  className="w-4 h-4 shrink-0 flex items-center justify-center border"
+                  style={{ borderColor: val ? T.signal : T.ink4, background: val ? T.signal : "transparent" }}
+                >
+                  {val && <CheckCircle2 size={11} style={{ color: T.ink1 }} aria-hidden="true" />}
+                </span>
+                <span className="text-[13px]" style={{ color: T.bone1 }}>{lab}</span>
+              </button>
+            ))}
+          </div>
+          {!attest && (
+            <p className="mt-2 text-[11px]" style={{ color: T.bone3 }}>
+              The anti-corruption attestation is mandatory to proceed.
+            </p>
+          )}
+        </div>
+      )}
+
+      {step === 3 && (
+        <div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Assigned role">
+              <SelectInput value={role} onChange={setRole} options={ONBOARD_ROLES[type]} />
+            </Field>
+            <Field label="Access tier">
+              <div className="px-3 py-2 border" style={{ borderColor: T.ink3 }}>
+                <Chip size="xs" tone="info">{tierFor(role)}</Chip>
+              </div>
+            </Field>
+          </div>
+          <Field label="Linked project" hint="The party gains scoped access to this project only.">
+            <SelectInput
+              value={pid}
+              onChange={setPid}
+              options={PROJECTS.map((p) => ({ value: p.id, label: `${p.flag} ${p.name}` }))}
+            />
+          </Field>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="border divide-y" style={{ borderColor: T.ink3 }}>
+          {[
+            ["Party type", type],
+            ["Organization", org],
+            ["Country", country],
+            ["Contact", `${contact} · ${email}`],
+            ["Role · tier", `${role} · ${tierFor(role)}`],
+            ["Linked project", pid],
+            ["Compliance docs", `${docs.length} uploaded`],
+            ["Attestations", `${[attest, tax].filter(Boolean).length} of 2`],
+          ].map(([k, v]) => (
+            <div key={k} className="px-3 py-2.5">
+              <MetaRow label={k} value={v} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FLOW: NEW CONTRACT
+// ════════════════════════════════════════════════════════════════════════════
+
+const CONTRACT_MILESTONES = ["Mobilization", "Earthworks", "Structural", "Finishes", "Handover"];
+
+function NewContractModal({ onClose, onComplete }) {
+  const steps = ["Project", "Award", "Schedule", "Review"];
+  const [step, setStep] = useState(0);
+  const [pid, setPid] = useState(PROJECTS[0].id);
+  const [title, setTitle] = useState("");
+  const [method, setMethod] = useState("ICB");
+  const [contractor, setContractor] = useState(CONTRACTORS[0]);
+  const [value, setValue] = useState("");
+  const [signed, setSigned] = useState("2026-01-15");
+  const [retention, setRetention] = useState("5");
+
+  const numValue = Number(value) || 0;
+  const project = PROJECTS.find((p) => p.id === pid);
+  const canNext = step === 0 ? title.trim() : step === 1 ? numValue > 0 : true;
+  const split = [25, 30, 25, 15, 5];
+
+  const finish = () => {
+    onComplete({
+      id: `CT-NEW-${Math.floor(100 + Math.random() * 900)}`,
+      pid,
+      title: title.trim(),
+      contractor,
+      value: numValue,
+      signed,
+      status: "awarded",
+      method,
+      amendments: 0,
+    });
+  };
+
+  return (
+    <Modal
+      title="New contract"
+      subtitle="Procurement → award → schedule"
+      icon={FileText}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button onClick={step === 0 ? onClose : () => setStep((s) => s - 1)} iconLeft={ChevronLeft}>
+            {step === 0 ? "Cancel" : "Back"}
+          </Button>
+          {step < 3 ? (
+            <Button variant="primary" iconRight={ArrowRight} onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext}>
+              Continue
+            </Button>
+          ) : (
+            <Button variant="primary" iconRight={BadgeCheck} onClick={finish}>
+              Create contract
+            </Button>
+          )}
+        </>
+      }
+    >
+      <StepDots steps={steps} current={step} />
+
+      {step === 0 && (
+        <div>
+          <Field label="Project">
+            <SelectInput
+              value={pid}
+              onChange={setPid}
+              options={PROJECTS.map((p) => ({ value: p.id, label: `${p.flag} ${p.name}` }))}
+            />
+          </Field>
+          <Field label="Contract title">
+            <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Principal Works — Lot 1" />
+          </Field>
+          <Field label="Procurement method" hint="ICB / NCB competitive, QCBS quality-cost, Direct single-source.">
+            <RadioCards
+              value={method}
+              onChange={setMethod}
+              options={PROC_METHODS.map((m) => ({ value: m, label: m }))}
+            />
+          </Field>
+        </div>
+      )}
+
+      {step === 1 && (
+        <div>
+          <Field label="Awarded contractor">
+            <SelectInput value={contractor} onChange={setContractor} options={CONTRACTORS} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Contract value (USD)" hint={numValue ? fmtUSD(numValue) : "Enter the awarded amount."}>
+              <TextInput value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ""))} placeholder="0" inputMode="numeric" />
+            </Field>
+            <Field label="Retention %">
+              <SelectInput value={retention} onChange={setRetention} options={["0", "5", "10"]} />
+            </Field>
+          </div>
+          <Field label="Signature date">
+            <TextInput value={signed} onChange={(e) => setSigned(e.target.value)} type="date" />
+          </Field>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div>
+          <p className="font-mono text-[10px] tracking-widest uppercase mb-3" style={{ color: T.bone2 }}>
+            Payment schedule · milestone-linked disbursement
+          </p>
+          <ul className="border divide-y" style={{ borderColor: T.ink3 }}>
+            {CONTRACT_MILESTONES.map((m, i) => (
+              <li key={m} className="px-3 py-2.5 flex items-center gap-3">
+                <span className="font-mono text-[10px] tracking-widest uppercase w-12" style={{ color: T.bone2 }}>
+                  M-{String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="flex-1 text-sm" style={{ color: T.bone0 }}>{m}</span>
+                <span className="font-mono text-[11px] tabular-nums" style={{ color: T.bone2 }}>{split[i]}%</span>
+                <span className="font-mono text-[11px] tabular-nums w-24 text-right" style={{ color: T.bone0 }}>
+                  {fmtUSD((numValue * split[i]) / 100)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px]" style={{ color: T.bone3 }}>
+            Each tranche releases only after the linked milestone reaches the Verified ledger state.
+          </p>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="border divide-y" style={{ borderColor: T.ink3 }}>
+          {[
+            ["Project", `${project.flag} ${pid}`],
+            ["Title", title],
+            ["Method", method],
+            ["Contractor", contractor],
+            ["Value", fmtUSD(numValue)],
+            ["Retention", `${retention}%`],
+            ["Signed", signed],
+          ].map(([k, v]) => (
+            <div key={k} className="px-3 py-2.5">
+              <MetaRow label={k} value={v} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FLOW: E-SIGNATURE
+// ════════════════════════════════════════════════════════════════════════════
+
+function SignModal({ signature, onClose, onComplete }) {
+  const [code, setCode] = useState("");
+  const [done, setDone] = useState(null);
+  const p = PROJECTS.find((x) => x.id === signature.pid);
+  const valid = /^[0-9]{6}$/.test(code);
+  const sigHash = useMemo(() => fauxHash(`sig-${signature.id}-${code}`), [signature.id, code]);
+
+  return (
+    <Modal
+      title="Apply e-signature"
+      subtitle="Government-grade · hash-locked"
+      icon={FileSignature}
+      onClose={onClose}
+      footer={
+        done ? (
+          <Button variant="primary" className="ml-auto" iconRight={ArrowRight} onClick={onClose}>
+            Close
+          </Button>
+        ) : (
+          <>
+            <Button variant="danger" onClick={() => { setDone("declined"); onComplete(signature.id, "declined"); }}>
+              Decline
+            </Button>
+            <Button
+              variant="primary"
+              iconLeft={Stamp}
+              disabled={!valid}
+              onClick={() => { setDone("signed"); onComplete(signature.id, "signed"); }}
+            >
+              Sign document
+            </Button>
+          </>
+        )
+      }
+    >
+      {done ? (
+        <div className="flex flex-col items-center gap-3 py-4 text-center">
+          <span
+            className="inline-flex items-center justify-center w-12 h-12 border"
+            style={{ borderColor: done === "signed" ? T.signal : T.alert }}
+          >
+            {done === "signed" ? (
+              <BadgeCheck size={24} style={{ color: T.signal }} aria-hidden="true" />
+            ) : (
+              <X size={24} style={{ color: T.alert }} aria-hidden="true" />
+            )}
+          </span>
+          <p className="text-sm" style={{ color: T.bone0 }}>
+            {done === "signed" ? "Signature applied & anchored." : "Document declined — returned to originator."}
+          </p>
+          {done === "signed" && (
+            <code className="font-mono text-[11px]" style={{ color: T.bone2 }} title={sigHash}>
+              {sigHash.slice(0, 30)}…
+            </code>
+          )}
+        </div>
+      ) : (
+        <div>
+          <div className="border divide-y mb-4" style={{ borderColor: T.ink3 }}>
+            {[
+              ["Document", signature.doc],
+              ["Project", `${p?.flag} ${signature.pid}`],
+              ["Your role", signature.role],
+              ["Sequence position", signature.seq],
+              ["Auth method", signature.method],
+            ].map(([k, v]) => (
+              <div key={k} className="px-3 py-2.5">
+                <MetaRow label={k} value={v} />
+              </div>
+            ))}
+          </div>
+          <Field
+            label="Multi-factor code"
+            hint={code && !valid ? "Enter the 6-digit code from your authenticator." : "Sent to your registered authenticator app."}
+          >
+            <TextInput
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              placeholder="000000"
+              inputMode="numeric"
+            />
+          </Field>
+          <p className="text-[11px] flex items-center gap-1.5" style={{ color: T.bone3 }}>
+            <Lock size={11} aria-hidden="true" />
+            Signing hash-locks the document — any later change breaks the workflow hash.
+          </p>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -5256,7 +6231,7 @@ export default function TrustSferDashboard() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..700,30..100&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-        :root { color-scheme: dark; }
+        :root { color-scheme: light; }
         body { background: ${T.ink0}; }
 
         .ts-skip-link {
@@ -5287,7 +6262,7 @@ export default function TrustSferDashboard() {
           background: linear-gradient(
             90deg,
             transparent 0%,
-            rgba(255,255,255,0.04) 50%,
+            rgba(0,0,0,0.05) 50%,
             transparent 100%
           );
           animation: ts-shimmer-kf 1.6s infinite linear;
@@ -5301,6 +6276,11 @@ export default function TrustSferDashboard() {
           animation: ts-fade-in-kf 420ms cubic-bezier(0.22,1,0.36,1);
         }
 
+        @keyframes ts-spin-kf {
+          to { transform: rotate(360deg); }
+        }
+        .ts-spin { animation: ts-spin-kf 1s linear infinite; }
+
         @keyframes ts-blink-soft-kf {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.35; }
@@ -5310,11 +6290,11 @@ export default function TrustSferDashboard() {
         }
 
         .ts-row:hover {
-          background: rgba(255,255,255,0.015);
+          background: rgba(0,0,0,0.022);
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .ts-shimmer, .ts-fade-in, .ts-blink-soft {
+          .ts-shimmer, .ts-fade-in, .ts-blink-soft, .ts-spin {
             animation: none !important;
           }
           * { scroll-behavior: auto !important; }
