@@ -58,6 +58,24 @@ import {
   PlusCircle,
   CornerDownLeft,
   Sparkles,
+  FileText,
+  Workflow,
+  Network,
+  Scale,
+  GitBranch,
+  Gauge,
+  ShieldAlert,
+  FileSignature,
+  Stamp,
+  Banknote,
+  Brain,
+  KeyRound,
+  UserCog,
+  ScrollText,
+  Fingerprint,
+  Send,
+  Boxes,
+  TrendingDown,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -992,13 +1010,21 @@ function Card({ children, className = "" }) {
 const MODULES = [
   { id: "overview", label: "Portfolio", icon: LayoutDashboard, group: "Workspace" },
   { id: "projects", label: "Projects", icon: FolderKanban, group: "Workspace" },
+  { id: "contracts", label: "Contracts", icon: FileText, group: "Workspace" },
   { id: "evidence", label: "Evidence Ledger", icon: Hash, group: "Verification" },
   { id: "i3", label: "I³ Analytics", icon: TrendingUp, group: "Verification" },
   { id: "conflicts", label: "Conflict Detection", icon: AlertTriangle, group: "Verification" },
+  { id: "ledger", label: "Ledger Sync", icon: Network, group: "Verification" },
+  { id: "audit", label: "Audit Trail", icon: FileSearch, group: "Verification" },
+  { id: "workflows", label: "Workflows", icon: Workflow, group: "Operations" },
   { id: "approvals", label: "Approvals", icon: CheckSquare, group: "Operations" },
+  { id: "signatures", label: "E-Signatures", icon: FileSignature, group: "Operations" },
   { id: "disbursements", label: "Disbursements", icon: Landmark, group: "Operations" },
   { id: "geo", label: "Geospatial", icon: MapIcon, group: "Operations" },
-  { id: "audit", label: "Audit Trail", icon: FileSearch, group: "Verification" },
+  { id: "risk", label: "AI Risk Prediction", icon: Brain, group: "Intelligence" },
+  { id: "portal", label: "Public Portal", icon: Globe2, group: "Transparency" },
+  { id: "reports", label: "Reports", icon: ScrollText, group: "Transparency" },
+  { id: "access", label: "Access & Identity", icon: UserCog, group: "Administration" },
 ];
 
 function Sidebar({ active, onNavigate, collapsed, mobileOpen, onCloseMobile }) {
@@ -3960,6 +3986,1022 @@ function AuditView({ onOpenProject }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// EXTENDED DATA — Contracts, Workflows, Signatures, Ledger Sync, Risk, Access
+// ════════════════════════════════════════════════════════════════════════════
+
+const CONTRACTORS = [
+  "Andrade Construções SA",
+  "Sinohydro Group Ltd",
+  "Strabag SE",
+  "China Harbour Engineering",
+  "VINCI Construction Grands Projets",
+  "Webuild S.p.A.",
+  "Larsen & Toubro Ltd",
+  "Hyundai Engineering & Construction",
+  "Bouygues Travaux Publics",
+  "Ferrovial Construcción",
+  "Orascom Construction",
+  "Acciona Infraestructuras",
+  "Samsung C&T",
+  "Power Construction Corp",
+];
+const PROC_METHODS = ["ICB", "NCB", "QCBS", "Direct"];
+
+const CONTRACTS = PROJECTS.map((p, i) => {
+  const value = Math.round(p.budget * 0.82);
+  const status =
+    p.progress >= 96
+      ? "closed"
+      : p.alerts >= 3
+      ? "amended"
+      : p.progress < 25
+      ? "awarded"
+      : "active";
+  return {
+    id: `CT-${p.id}`,
+    pid: p.id,
+    title: `${p.name} — Principal Works`,
+    contractor: CONTRACTORS[i % CONTRACTORS.length],
+    value,
+    signed: p.started,
+    status,
+    method: PROC_METHODS[i % PROC_METHODS.length],
+    amendments: p.alerts > 2 ? 3 : p.alerts,
+  };
+});
+
+const CHANGE_ORDERS = [
+  { id: "CO-3104", pid: "PH-HSP-GMA", title: "Structural reinforcement — seismic Annex B", delta: 8_400_000, reason: "Scope variation", status: "pending", raised: "2d ago", approvals: "Engineer · Ministry" },
+  { id: "CO-3101", pid: "BD-DR-CYC", title: "Additional drainage culverts — Sector 4", delta: 2_100_000, reason: "Site condition", status: "approved", raised: "6d ago", approvals: "Engineer · Ministry · Donor" },
+  { id: "CO-3098", pid: "KE-PRT-MS3", title: "Quay crane rail re-grade", delta: 3_650_000, reason: "Design correction", status: "pending", raised: "9d ago", approvals: "Engineer" },
+  { id: "CO-3094", pid: "GH-MN-ACR", title: "Deduct — reduced pump station count", delta: -1_250_000, reason: "Value engineering", status: "approved", raised: "12d ago", approvals: "Engineer · Ministry" },
+  { id: "CO-3090", pid: "ID-EN-JKT", title: "Transmission tower route deviation", delta: 5_900_000, reason: "Land access", status: "disputed", raised: "15d ago", approvals: "Engineer · Ministry" },
+];
+
+const WF_STAGES = ["Engineer", "Project Manager", "Auditor", "Ministry", "Donor", "Finance"];
+const WORKFLOWS = [
+  { id: "WF-5521", pid: "RD-N4-EXP", title: "Milestone M-14 certification", stage: 3, sla: "due 4h", blocked: false, kind: "Milestone" },
+  { id: "WF-5519", pid: "PH-HSP-GMA", title: "Contract amendment #3 sign-off", stage: 1, sla: "overdue 6h", blocked: true, kind: "Amendment" },
+  { id: "WF-5516", pid: "BD-DR-CYC", title: "Disbursement tranche M-12", stage: 4, sla: "due 18h", blocked: false, kind: "Payment" },
+  { id: "WF-5512", pid: "CO-EN-LLR", title: "Subcontractor onboarding", stage: 2, sla: "due 22h", blocked: false, kind: "Onboarding" },
+  { id: "WF-5508", pid: "KE-PRT-MS3", title: "Change order CO-3098 routing", stage: 0, sla: "due 2d", blocked: false, kind: "Change Order" },
+  { id: "WF-5503", pid: "EG-HSP-CRO", title: "Quarterly assurance package", stage: 5, sla: "due 36h", blocked: false, kind: "Reporting" },
+  { id: "WF-5499", pid: "VN-EN-MEK", title: "Substation A4 handover acceptance", stage: 2, sla: "overdue 2h", blocked: true, kind: "Handover" },
+];
+const WF_RULES = [
+  "Inspection evidence required before financial approval",
+  "Donor signature mandatory for contracts above $5M",
+  "Two independent inspectors required for milestone M-3",
+  "Milestone cannot advance before its dependency is Verified",
+];
+const WF_FAILSAFES = [
+  "No backdating — workflow hash anchors order of events",
+  "No skipping — condition-based routing enforces sequence",
+  "No reversal without a blockchain-logged justification",
+  "Real-time escalation alerts to supervisors on SLA breach",
+];
+
+const SIGNATURES = [
+  { id: "SIG-8841", pid: "RD-N4-EXP", doc: "Milestone M-14 Certificate", role: "Ministry Director", seq: "3 of 5", status: "pending", actor: "F. Haddad", when: "due 4h", geo: "Santo Domingo · DO", method: "MFA + Biometric" },
+  { id: "SIG-8838", pid: "PH-HSP-GMA", doc: "Contract Amendment #3", role: "Project Engineer", seq: "1 of 4", status: "pending", actor: "P. dela Cruz", when: "overdue 6h", geo: "Manila · PH", method: "MFA" },
+  { id: "SIG-8835", pid: "EG-HSP-CRO", doc: "Disbursement Authorization", role: "Finance Controller", seq: "4 of 4", status: "signed", actor: "N. Saleh", when: "2h ago", geo: "Cairo · EG", method: "MFA + Hardware Key" },
+  { id: "SIG-8830", pid: "KE-PRT-MS3", doc: "Inspection Report M-09", role: "Third-party Inspector", seq: "2 of 3", status: "signed", actor: "M. Otieno", when: "5h ago", geo: "Mombasa · KE", method: "MFA + Biometric" },
+  { id: "SIG-8826", pid: "BD-DR-CYC", doc: "Change Order CO-3101", role: "Donor Representative", seq: "3 of 3", status: "declined", actor: "USAID Monitor", when: "yesterday", geo: "Dhaka · BD", method: "MFA" },
+  { id: "SIG-8821", pid: "CO-EN-LLR", doc: "Subcontractor Agreement", role: "Procurement Lead", seq: "1 of 3", status: "pending", actor: "L. Moreno", when: "due 20h", geo: "Bogotá · CO", method: "MFA" },
+];
+
+const LEDGER_STATES = ["Draft", "Pending Sync", "Pending Consensus", "Verified", "Locked", "Disputed", "Auditor Review", "Reconciled"];
+const LEDGER_RECORDS = [
+  { id: "LR-44120", pid: "KE-PRT-MS3", type: "Financial", unit: "usd", state: 2, gov: 522_300_000, donor: 519_800_000, contractor: 524_100_000, updated: "3m ago" },
+  { id: "LR-44117", pid: "PH-HSP-GMA", type: "Milestone", unit: "pct", state: 5, gov: 81, donor: 62, contractor: 88, updated: "11m ago" },
+  { id: "LR-44113", pid: "BD-DR-CYC", type: "Change Order", unit: "usd", state: 5, gov: 2_100_000, donor: 0, contractor: 2_100_000, updated: "26m ago" },
+  { id: "LR-44109", pid: "RD-N4-EXP", type: "Milestone", unit: "pct", state: 7, gov: 64, donor: 64, contractor: 64, updated: "1h ago" },
+  { id: "LR-44104", pid: "ID-EN-JKT", type: "Financial", unit: "usd", state: 6, gov: 408_500_000, donor: 408_500_000, contractor: 414_400_000, updated: "2h ago" },
+  { id: "LR-44098", pid: "EG-HSP-CRO", type: "Procurement", unit: "n", state: 7, gov: 1, donor: 1, contractor: 1, updated: "3h ago" },
+  { id: "LR-44091", pid: "CO-EN-LLR", type: "Contract", unit: "usd", state: 3, gov: 278_800_000, donor: 278_800_000, contractor: 278_800_000, updated: "5h ago" },
+];
+const CONSENSUS_TRIGGERS = [
+  { name: "Disbursement Trigger", rule: "Contractor submits → Inspector verifies → ledger marks Verified → payment execution allowed.", icon: Banknote },
+  { name: "Change Order Trigger", rule: "Engineer + Ministry + Donor approval required before a variation is accepted.", icon: GitBranch },
+  { name: "Procurement Integrity Trigger", rule: "On anomaly the ledger halts milestone reporting and alerts the auditor automatically.", icon: ShieldAlert },
+];
+
+const RISK_MODELS = ["Gradient Boosting", "Random Forest", "Logistic Regression", "Temporal Anomaly"];
+const RISK_DRIVERS = {
+  critical: ["Disbursement velocity anomaly", "Repeated evidence hash collisions", "Approval sequence compression"],
+  high: ["Schedule slippage acceleration", "Invoice-to-progress divergence", "Inspector narrative variance"],
+  elevated: ["Minor GPS metadata drift", "Single-role amendment pattern"],
+  low: ["No material anomalies detected"],
+};
+const RISK = PROJECTS.map((p, i) => {
+  const fraud = Math.min(98, Math.max(3, Math.round(100 - p.i3 + p.alerts * 5)));
+  const tamper = Math.min(95, Math.max(2, Math.round(fraud * 0.7 + p.alerts * 3)));
+  const cls = fraud >= 70 ? "critical" : fraud >= 50 ? "high" : fraud >= 30 ? "elevated" : "low";
+  return { pid: p.id, fraud, tamper, cls, model: RISK_MODELS[i % RISK_MODELS.length], drivers: RISK_DRIVERS[cls] };
+});
+
+const REPORT_TEMPLATES = [
+  { id: "tpl-wb-isr", name: "World Bank — Implementation Status Report", fmt: "PDF", cadence: "Quarterly" },
+  { id: "tpl-donor-q", name: "Donor Quarterly Disbursement Report", fmt: "XLSX", cadence: "Quarterly" },
+  { id: "tpl-audit", name: "Audit-Ready Evidence Pack", fmt: "PDF", cadence: "On demand" },
+  { id: "tpl-ocds", name: "Open Contracting (OCDS) Export", fmt: "JSON", cadence: "Monthly" },
+  { id: "tpl-pfm", name: "Public Financial Management Reconciliation", fmt: "CSV", cadence: "Monthly" },
+];
+const REPORTS = [
+  { id: "RPT-2291", template: "World Bank — ISR", pid: "KE-PRT-MS3", generated: "2h ago", fmt: "PDF", status: "ready", size: "4.2 MB" },
+  { id: "RPT-2288", template: "Donor Quarterly", pid: "EG-HSP-CRO", generated: "6h ago", fmt: "XLSX", status: "ready", size: "1.1 MB" },
+  { id: "RPT-2285", template: "Audit Evidence Pack", pid: "PH-HSP-GMA", generated: "—", fmt: "PDF", status: "generating", size: "—" },
+  { id: "RPT-2280", template: "OCDS Export", pid: "ALL", generated: "1d ago", fmt: "JSON", status: "ready", size: "812 KB" },
+  { id: "RPT-2277", template: "PFM Reconciliation", pid: "ALL", generated: "—", fmt: "CSV", status: "scheduled", size: "—" },
+];
+
+const IDENTITY_TYPES = [
+  { type: "Government", icon: Landmark, count: 142, ex: "Public Works, Finance, Planning, municipal authorities" },
+  { type: "Donors", icon: Globe2, count: 38, ex: "World Bank, IDB, ADB, USAID, UN agencies" },
+  { type: "EPC Contractors", icon: HardHat, count: 96, ex: "Engineers, operators, PMs, compliance officers" },
+  { type: "Auditors", icon: FileSearch, count: 27, ex: "National Audit Office, donor auditors, inspectors" },
+  { type: "Public / Civil Society", icon: Users, count: "Open", ex: "Read-only, redacted transparency view" },
+];
+const RBAC_ROLES = [
+  { role: "Ministry Director", users: 14, scope: "Full internal · approve · sign", tier: "L4" },
+  { role: "Donor Representative", users: 9, scope: "Oversight · disbursement sign-off", tier: "L4" },
+  { role: "Auditor", users: 21, scope: "Read-all · evidence verification · export", tier: "L4" },
+  { role: "Project Engineer", users: 33, scope: "Evidence · milestone certification", tier: "L3" },
+  { role: "Field Inspector", users: 48, scope: "Mobile capture · inspection sign-off", tier: "L2" },
+  { role: "Public Viewer", users: "—", scope: "Redacted transparency portal only", tier: "L0" },
+];
+const VERIFY_PARTIES = [
+  { n: 1, party: "Contractor Evidence", desc: "Initial submission — photos, drone, invoices.", icon: HardHat },
+  { n: 2, party: "Inspector Evidence", desc: "Independent field verification.", icon: Eye },
+  { n: 3, party: "Government Validation", desc: "Approval workflows and certification.", icon: Landmark },
+  { n: 4, party: "Donor Oversight", desc: "Disbursement authorization.", icon: Globe2 },
+];
+const SESSIONS = [
+  { user: "S. Ramírez", role: "Auditor · L4", device: "macOS · Chrome", ip: "196.20.x.x", geo: "Santo Domingo", when: "active now" },
+  { user: "F. Haddad", role: "Ministry · L4", device: "Windows · Edge", ip: "41.67.x.x", geo: "Cairo", when: "4m ago" },
+  { user: "M. Otieno", role: "Inspector · L2", device: "Android · Field App", ip: "105.16.x.x", geo: "Mombasa", when: "12m ago" },
+  { user: "USAID Monitor", role: "Donor · L4", device: "iOS · Safari", ip: "8.45.x.x", geo: "Washington DC", when: "1h ago" },
+];
+
+const fmtSigned = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtUSD(Math.abs(n))}`;
+
+// ── shared atoms for extended views ────────────────────────────────────────
+
+function MetaRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+        {label}
+      </span>
+      <span className="font-mono text-[11px]" style={{ color: T.bone0 }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function WorkflowStepper({ stage, blocked }) {
+  return (
+    <ol className="flex items-center gap-1 flex-wrap">
+      {WF_STAGES.map((s, i) => {
+        const done = i < stage;
+        const current = i === stage;
+        const accent = blocked ? T.alert : T.signal;
+        return (
+          <li key={s} className="flex items-center gap-1">
+            <span
+              className="font-mono text-[9px] tracking-widest uppercase px-2 py-1 border"
+              style={{
+                borderColor: current ? accent : done ? T.ink4 : T.ink3,
+                color: current ? accent : done ? T.bone1 : T.bone3,
+                background: current
+                  ? blocked
+                    ? "rgba(255,95,60,0.08)"
+                    : "rgba(196,255,63,0.06)"
+                  : "transparent",
+              }}
+            >
+              {done && <CheckCircle2 size={9} className="inline mr-1" aria-hidden="true" />}
+              {s}
+            </span>
+            {i < WF_STAGES.length - 1 && (
+              <ChevronRight size={10} style={{ color: T.ink4 }} aria-hidden="true" />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: CONTRACTS & PROCUREMENT
+// ════════════════════════════════════════════════════════════════════════════
+
+function ContractsView({ onOpenProject }) {
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const totalValue = CONTRACTS.reduce((s, c) => s + c.value, 0);
+  const active = CONTRACTS.filter((c) => c.status === "active").length;
+  const amendTotal = CONTRACTS.reduce((s, c) => s + c.amendments, 0);
+  const filtered = CONTRACTS.filter(
+    (c) => statusFilter === "ALL" || c.status === statusFilter
+  );
+  const statusTone = {
+    procurement: "info",
+    awarded: "plum",
+    active: "verified",
+    amended: "warn",
+    closed: "neutral",
+  };
+
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Contract value" value={fmtUSD(totalValue)} sublabel={`${CONTRACTS.length} contracts`} />
+        <KPI label="Active contracts" value={active} sublabel="under execution" />
+        <KPI label="Amendments" value={amendTotal} delta={3.0} sublabel="cumulative variations" />
+        <KPI label="Change orders" value={CHANGE_ORDERS.filter((c) => c.status === "pending").length} sublabel="pending decision" />
+      </div>
+
+      <div className="col-span-12" style={{ background: T.ink1 }}>
+        <CardHeader
+          title="Contract registry"
+          subtitle="Procurement → award → execution → close-out"
+          right={
+            <Select
+              label="Status"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={["ALL", "procurement", "awarded", "active", "amended", "closed"]}
+            />
+          }
+        />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead style={{ background: T.ink2 }}>
+              <tr className="border-b" style={{ borderColor: T.ink3 }}>
+                {["Contract", "Contractor", "Method", "Value", "Amend.", "Status", ""].map((h, i) => (
+                  <th
+                    key={h || i}
+                    scope="col"
+                    className={`px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap ${
+                      h === "Value" || h === "Amend." ? "text-right" : "text-left"
+                    }`}
+                    style={{ color: T.bone2 }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c) => {
+                const p = PROJECTS.find((x) => x.id === c.pid);
+                return (
+                  <tr
+                    key={c.id}
+                    className="ts-row border-b cursor-pointer"
+                    style={{ borderColor: T.ink3 }}
+                    onClick={() => onOpenProject(c.pid)}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") onOpenProject(c.pid);
+                    }}
+                  >
+                    <td className="px-4 py-3 align-middle">
+                      <div className="flex items-center gap-2.5">
+                        <span aria-hidden="true">{p?.flag}</span>
+                        <div className="min-w-0">
+                          <div className="truncate" style={{ color: T.bone0 }}>{c.title}</div>
+                          <div className="font-mono text-[10px] tracking-widest uppercase truncate" style={{ color: T.bone2 }}>
+                            {c.id} · {c.pid}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone1 }}>
+                      {c.contractor}
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <Chip size="xs">{c.method}</Chip>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right font-mono tabular-nums" style={{ color: T.bone0 }}>
+                      {fmtUSD(c.value)}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right font-mono tabular-nums" style={{ color: c.amendments ? T.amber : T.bone2 }}>
+                      {c.amendments}
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <Chip tone={statusTone[c.status]} size="xs">{c.status}</Chip>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right">
+                      <ChevronRight size={14} style={{ color: T.bone2 }} aria-hidden="true" />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="col-span-12" style={{ background: T.ink1 }}>
+        <CardHeader title="Change orders" subtitle="Scope variations · cost adjustments · §9.4" />
+        <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+          {CHANGE_ORDERS.map((c) => {
+            const p = PROJECTS.find((x) => x.id === c.pid);
+            return (
+              <li key={c.id} className="px-5 md:px-6 py-4 flex flex-col md:flex-row md:items-center gap-4" style={{ borderColor: T.ink3 }}>
+                <Chip
+                  tone={c.status === "approved" ? "verified" : c.status === "disputed" ? "risk" : "warn"}
+                  size="xs"
+                >
+                  {c.status}
+                </Chip>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm" style={{ color: T.bone0 }}>{c.title}</p>
+                  <p className="mt-1 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                    {c.id} · {p?.flag} {c.pid} · {c.reason} · raised {c.raised} · {c.approvals}
+                  </p>
+                </div>
+                <span
+                  className="font-mono text-sm tabular-nums shrink-0"
+                  style={{ color: c.delta > 0 ? T.alert : T.signal }}
+                >
+                  {fmtSigned(c.delta)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: WORKFLOW ORCHESTRATION
+// ════════════════════════════════════════════════════════════════════════════
+
+function WorkflowsView({ onOpenProject }) {
+  const blocked = WORKFLOWS.filter((w) => w.blocked).length;
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Active workflows" value={WORKFLOWS.length} sublabel="in orchestration" />
+        <KPI label="Blocked / overdue" value={blocked} delta={blocked ? 2.0 : 0} sublabel="SLA breached" />
+        <KPI label="Avg. chain" value={`${WF_STAGES.length} steps`} sublabel="Engineer → Finance" />
+        <KPI label="Fail-safes" value={WF_FAILSAFES.length} sublabel="enforced controls" />
+      </div>
+
+      <div className="col-span-12 lg:col-span-8" style={{ background: T.ink1 }}>
+        <CardHeader title="Workflow instances" subtitle="State-machine routing · condition-based · §6.4" />
+        <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+          {WORKFLOWS.map((w) => {
+            const p = PROJECTS.find((x) => x.id === w.pid);
+            return (
+              <li key={w.id} className="px-5 md:px-6 py-4" style={{ borderColor: T.ink3 }}>
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Chip size="xs" tone="plum">{w.kind}</Chip>
+                      <span className="text-sm truncate" style={{ color: T.bone0 }}>{w.title}</span>
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {w.id} · {p?.flag} {w.pid}
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <Chip size="xs" tone={w.blocked ? "risk" : "info"}>{w.sla}</Chip>
+                    <Button size="xs" iconRight={ArrowRight} onClick={() => onOpenProject(w.pid)}>
+                      Open
+                    </Button>
+                  </div>
+                </div>
+                <WorkflowStepper stage={w.stage} blocked={w.blocked} />
+                {w.blocked && (
+                  <p className="mt-2 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.alert }}>
+                    <AlertTriangle size={10} className="inline mr-1" aria-hidden="true" />
+                    Blocked — missing evidence at {WF_STAGES[w.stage]} step
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div className="col-span-12 lg:col-span-4 grid grid-rows-2 gap-px" style={{ background: T.ink3 }}>
+        <div style={{ background: T.ink1 }}>
+          <CardHeader title="Workflow rules" subtitle="Condition-based routing" />
+          <ul className="px-5 md:px-6 py-4 space-y-3">
+            {WF_RULES.map((r) => (
+              <li key={r} className="flex gap-2.5 text-xs" style={{ color: T.bone1 }}>
+                <GitBranch size={13} style={{ color: T.azure }} className="shrink-0 mt-0.5" aria-hidden="true" />
+                {r}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div style={{ background: T.ink1 }}>
+          <CardHeader title="Fail-safes" subtitle="Tamper-evident controls" />
+          <ul className="px-5 md:px-6 py-4 space-y-3">
+            {WF_FAILSAFES.map((r) => (
+              <li key={r} className="flex gap-2.5 text-xs" style={{ color: T.bone1 }}>
+                <Lock size={13} style={{ color: T.signal }} className="shrink-0 mt-0.5" aria-hidden="true" />
+                {r}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: E-SIGNATURES
+// ════════════════════════════════════════════════════════════════════════════
+
+function SignaturesView({ onOpenProject }) {
+  const pending = SIGNATURES.filter((s) => s.status === "pending").length;
+  const signed = SIGNATURES.filter((s) => s.status === "signed").length;
+  const statusTone = { pending: "warn", signed: "verified", declined: "risk" };
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Awaiting signature" value={pending} sublabel="in your sequences" />
+        <KPI label="Signed today" value={signed} sublabel="provenance anchored" />
+        <KPI label="Hash-locked docs" value={SIGNATURES.length} sublabel="integrity sealed" />
+        <KPI label="Declined" value={SIGNATURES.filter((s) => s.status === "declined").length} sublabel="returned to origin" />
+      </div>
+
+      <div className="col-span-12" style={{ background: T.ink1 }}>
+        <CardHeader
+          title="Signature ledger"
+          subtitle="Government-grade e-signature engine · DAG-sequenced · geo-tagged"
+          right={<Chip size="xs" tone="info">Module 2</Chip>}
+        />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead style={{ background: T.ink2 }}>
+              <tr className="border-b" style={{ borderColor: T.ink3 }}>
+                {["Document", "Signer · Role", "Sequence", "Provenance", "Status", ""].map((h, i) => (
+                  <th key={h || i} scope="col" className="text-left px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SIGNATURES.map((s) => {
+                const p = PROJECTS.find((x) => x.id === s.pid);
+                return (
+                  <tr key={s.id} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
+                    <td className="px-4 py-3 align-middle">
+                      <div className="flex items-center gap-2">
+                        <FileSignature size={14} style={{ color: T.bone2 }} aria-hidden="true" />
+                        <div className="min-w-0">
+                          <div className="truncate" style={{ color: T.bone0 }}>{s.doc}</div>
+                          <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                            {s.id} · {p?.flag} {s.pid}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <div style={{ color: T.bone0 }}>{s.actor}</div>
+                      <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>{s.role}</div>
+                    </td>
+                    <td className="px-4 py-3 align-middle font-mono text-[11px] tabular-nums" style={{ color: T.bone1 }}>
+                      {s.seq}
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                        <MapPin size={9} className="inline mr-1" aria-hidden="true" />{s.geo}
+                      </div>
+                      <div className="font-mono text-[10px]" style={{ color: T.bone2 }}>
+                        <Fingerprint size={9} className="inline mr-1" aria-hidden="true" />{s.method}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <Chip tone={statusTone[s.status]} size="xs">{s.status}</Chip>
+                      <div className="mt-1 font-mono text-[10px]" style={{ color: T.bone2 }}>{s.when}</div>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right">
+                      {s.status === "pending" ? (
+                        <Button size="xs" variant="primary" iconLeft={Stamp} onClick={() => onOpenProject(s.pid)}>
+                          Sign
+                        </Button>
+                      ) : (
+                        <BadgeCheck size={14} style={{ color: s.status === "signed" ? T.signal : T.alert }} aria-hidden="true" />
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: LEDGER SYNC (Patent #3)
+// ════════════════════════════════════════════════════════════════════════════
+
+function LedgerSyncView({ onOpenProject }) {
+  const fmtVal = (v, unit) =>
+    unit === "usd" ? fmtUSD(v) : unit === "pct" ? `${v}%` : String(v);
+  const disputed = LEDGER_RECORDS.filter((r) => LEDGER_STATES[r.state] === "Disputed").length;
+  const reconciled = LEDGER_RECORDS.filter((r) => LEDGER_STATES[r.state] === "Reconciled").length;
+
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Synced records" value={LEDGER_RECORDS.length} sublabel="3-party ledger" />
+        <KPI label="Disputed" value={disputed} delta={disputed ? 1.0 : 0} sublabel="awaiting consensus" />
+        <KPI label="Reconciled" value={reconciled} delta={2.0} sublabel="single source of truth" />
+        <KPI label="Connectors" value={4} sublabel="ERP · donor · contractor" />
+      </div>
+
+      <div className="col-span-12" style={{ background: T.ink1 }}>
+        <CardHeader title="Ledger state machine" subtitle="Every record traverses eight consensus states · §9.3" />
+        <div className="px-5 md:px-6 py-5 flex items-center gap-1.5 overflow-x-auto">
+          {LEDGER_STATES.map((st, i) => {
+            const count = LEDGER_RECORDS.filter((r) => r.state === i).length;
+            const tone = st === "Disputed" ? T.alert : st === "Reconciled" ? T.signal : T.bone1;
+            return (
+              <div key={st} className="flex items-center gap-1.5 shrink-0">
+                <div
+                  className="px-3 py-2 border text-center"
+                  style={{ borderColor: count ? tone : T.ink3, background: count ? "rgba(255,255,255,0.02)" : "transparent" }}
+                >
+                  <div className="font-mono text-[9px] tracking-widest uppercase" style={{ color: count ? tone : T.bone3 }}>
+                    {st}
+                  </div>
+                  <div className="font-serif text-lg tabular-nums" style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: count ? T.bone0 : T.bone3 }}>
+                    {count}
+                  </div>
+                </div>
+                {i < LEDGER_STATES.length - 1 && <ArrowRight size={12} style={{ color: T.ink4 }} aria-hidden="true" />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="col-span-12 lg:col-span-8" style={{ background: T.ink1 }}>
+        <CardHeader title="Reconciliation engine" subtitle="Government · Donor · Contractor record comparison" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead style={{ background: T.ink2 }}>
+              <tr className="border-b" style={{ borderColor: T.ink3 }}>
+                {["Record", "Type", "Government", "Donor", "Contractor", "State"].map((h) => (
+                  <th key={h} scope="col" className={`px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap ${h === "Record" || h === "Type" || h === "State" ? "text-left" : "text-right"}`} style={{ color: T.bone2 }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {LEDGER_RECORDS.map((r) => {
+                const p = PROJECTS.find((x) => x.id === r.pid);
+                const vals = [r.gov, r.donor, r.contractor];
+                const aligned = vals.every((v) => v === vals[0]);
+                const st = LEDGER_STATES[r.state];
+                return (
+                  <tr key={r.id} className="ts-row border-b cursor-pointer" style={{ borderColor: T.ink3 }} onClick={() => onOpenProject(r.pid)}>
+                    <td className="px-4 py-3 align-middle">
+                      <div className="font-mono text-[11px]" style={{ color: T.bone0 }}>{r.id}</div>
+                      <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>{p?.flag} {r.pid}</div>
+                    </td>
+                    <td className="px-4 py-3 align-middle"><Chip size="xs">{r.type}</Chip></td>
+                    {vals.map((v, idx) => (
+                      <td key={idx} className="px-4 py-3 align-middle text-right font-mono text-[11px] tabular-nums" style={{ color: aligned ? T.bone1 : v === Math.max(...vals) || v === Math.min(...vals) ? T.amber : T.bone1 }}>
+                        {fmtVal(v, r.unit)}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3 align-middle">
+                      <Chip size="xs" tone={st === "Disputed" ? "risk" : st === "Reconciled" || st === "Verified" ? "verified" : "info"}>
+                        {st}
+                      </Chip>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="col-span-12 lg:col-span-4" style={{ background: T.ink1 }}>
+        <CardHeader title="Consensus triggers" subtitle="Automated enforcement · §9.6" />
+        <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+          {CONSENSUS_TRIGGERS.map((t) => (
+            <li key={t.name} className="px-5 md:px-6 py-4" style={{ borderColor: T.ink3 }}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <t.icon size={14} style={{ color: T.signal }} aria-hidden="true" />
+                <span className="text-sm" style={{ color: T.bone0 }}>{t.name}</span>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: T.bone1 }}>{t.rule}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: AI RISK PREDICTION
+// ════════════════════════════════════════════════════════════════════════════
+
+function RiskView({ onOpenProject }) {
+  const clsTone = { critical: "risk", high: "risk", elevated: "warn", low: "verified" };
+  const clsColor = { critical: T.alert, high: T.alert, elevated: T.amber, low: T.signal };
+  const sorted = [...RISK].sort((a, b) => b.fraud - a.fraud);
+  const chart = sorted.map((r) => {
+    const p = PROJECTS.find((x) => x.id === r.pid);
+    return { name: r.pid, fraud: r.fraud, cls: r.cls };
+  });
+  const critical = RISK.filter((r) => r.cls === "critical").length;
+  const avgFraud = Math.round(RISK.reduce((s, r) => s + r.fraud, 0) / RISK.length);
+
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Portfolio fraud index" value={avgFraud} delta={-1.4} sublabel="weighted mean · /100" />
+        <KPI label="Critical-risk projects" value={critical} delta={critical ? 1.0 : 0} sublabel="immediate review" />
+        <KPI label="Models in ensemble" value={RISK_MODELS.length} sublabel="ML + rule hybrid" />
+        <KPI label="Predictive alerts" value={9} sublabel="last 24h" />
+      </div>
+
+      <div className="col-span-12 lg:col-span-7" style={{ background: T.ink1 }}>
+        <CardHeader title="Fraud likelihood index" subtitle="Per-project · ranked descending" right={<Chip size="xs" tone="plum">Module 8</Chip>} />
+        <div className="p-5" style={{ height: 340 }}>
+          <ResponsiveContainer>
+            <BarChart data={chart} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 30 }}>
+              <CartesianGrid stroke={T.ink3} strokeDasharray="2 4" horizontal={false} />
+              <XAxis type="number" domain={[0, 100]} stroke={T.bone3} tick={{ fontFamily: "JetBrains Mono", fontSize: 10, fill: T.bone2 }} axisLine={{ stroke: T.ink3 }} tickLine={false} />
+              <YAxis type="category" dataKey="name" width={80} stroke={T.bone3} tick={{ fontFamily: "JetBrains Mono", fontSize: 9, fill: T.bone2 }} axisLine={false} tickLine={false} />
+              <RTooltip
+                contentStyle={{ background: T.ink0, border: `1px solid ${T.ink3}`, fontFamily: "JetBrains Mono", fontSize: 11, color: T.bone0 }}
+                labelStyle={{ color: T.bone2 }}
+                cursor={{ fill: T.ink2 }}
+              />
+              <Bar dataKey="fraud" radius={[0, 1, 1, 0]}>
+                {chart.map((e, i) => (
+                  <Cell key={i} fill={clsColor[e.cls]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="col-span-12 lg:col-span-5" style={{ background: T.ink1 }}>
+        <CardHeader title="Risk classification" subtitle="Model drivers & tamper probability" />
+        <ul className="divide-y overflow-y-auto" style={{ borderColor: T.ink3, maxHeight: 340 }}>
+          {sorted.map((r) => {
+            const p = PROJECTS.find((x) => x.id === r.pid);
+            return (
+              <li key={r.pid} className="px-5 md:px-6 py-3" style={{ borderColor: T.ink3 }}>
+                <button type="button" onClick={() => onOpenProject(r.pid)} className="w-full text-left focus:outline-none focus-visible:ts-focus group">
+                  <div className="flex items-center gap-2">
+                    <span aria-hidden="true">{p?.flag}</span>
+                    <span className="text-sm flex-1 truncate group-hover:underline" style={{ color: T.bone0 }}>{p?.name}</span>
+                    <Chip size="xs" tone={clsTone[r.cls]}>{r.cls}</Chip>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-3 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                    <span>Fraud {r.fraud}</span>
+                    <span>Tamper {r.tamper}</span>
+                    <span>{r.model}</span>
+                  </div>
+                  <p className="mt-1 text-[11px]" style={{ color: T.bone1 }}>
+                    {r.drivers.join(" · ")}
+                  </p>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: PUBLIC TRANSPARENCY PORTAL
+// ════════════════════════════════════════════════════════════════════════════
+
+function PortalView() {
+  const [feedback, setFeedback] = useState("");
+  const [sent, setSent] = useState(false);
+  const reduced = usePrefersReducedMotion();
+
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div
+        className="col-span-12 px-5 md:px-6 py-4 flex flex-wrap items-center gap-3"
+        style={{ background: "rgba(141,182,255,0.05)", border: `1px solid rgba(141,182,255,0.2)` }}
+      >
+        <Eye size={16} style={{ color: T.azure }} aria-hidden="true" />
+        <span className="font-mono text-[11px] tracking-widest uppercase" style={{ color: T.azure }}>
+          Public transparency layer
+        </span>
+        <span className="text-xs" style={{ color: T.bone1 }}>
+          Redacted citizen view — sensitive coordinates, PII, and confidential donor terms removed by the automatic redaction engine.
+        </span>
+      </div>
+
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Public projects" value={PROJECTS.length} sublabel="open for inspection" />
+        <KPI label="Verified milestones" value={148} sublabel="evidence-backed" />
+        <KPI label="Public I³ average" value={(PROJECTS.reduce((s, p) => s + p.i3, 0) / PROJECTS.length).toFixed(1)} sublabel="redacted composite" />
+        <KPI label="Citizen reports" value={36} sublabel="community feedback" />
+      </div>
+
+      <div className="col-span-12 lg:col-span-8" style={{ background: T.ink1 }}>
+        <CardHeader title="Project explorer" subtitle="Verified, citizen-readable project profiles · §11.3" />
+        <ul className="grid grid-cols-1 md:grid-cols-2 gap-px" style={{ background: T.ink3 }}>
+          {PROJECTS.slice(0, 8).map((p) => {
+            const ct = CONTRACTS.find((c) => c.pid === p.id);
+            return (
+              <li key={p.id} className="p-5" style={{ background: T.ink1 }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span aria-hidden="true">{p.flag}</span>
+                  <span className="text-sm flex-1 truncate" style={{ color: T.bone0 }}>{p.name}</span>
+                  <I3Score score={p.i3} size="sm" />
+                </div>
+                <div className="font-mono text-[10px] tracking-widest uppercase mb-3" style={{ color: T.bone2 }}>
+                  {p.country} · {p.sector} · {ct?.contractor || "—"}
+                </div>
+                <div className="flex items-center justify-between mb-1 font-mono text-[10px]" style={{ color: T.bone2 }}>
+                  <span>Verified spending</span>
+                  <span style={{ color: T.bone0 }}>{fmtUSD(p.spent)} / {fmtUSD(p.budget)}</span>
+                </div>
+                <ProgressBar value={(p.spent / p.budget) * 100} color={T.azure} />
+                <div className="mt-2 flex items-center justify-between">
+                  <Chip size="xs" tone={i3Tone(p.i3)}>I³ {p.i3.toFixed(0)}</Chip>
+                  <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                    {p.progress}% complete
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div className="col-span-12 lg:col-span-4 grid grid-rows-2 gap-px" style={{ background: T.ink3 }}>
+        <div style={{ background: T.ink1 }}>
+          <CardHeader title="Donor contributions" subtitle="Verified disbursements" />
+          <ul className="px-5 md:px-6 py-4 space-y-3">
+            {DONORS.map((d) => {
+              const total = PROJECTS.filter((p) => p.donor === d).reduce((s, p) => s + p.spent, 0);
+              const max = Math.max(...DONORS.map((x) => PROJECTS.filter((p) => p.donor === x).reduce((s, p) => s + p.spent, 0)));
+              return (
+                <li key={d}>
+                  <div className="flex items-center justify-between mb-1 font-mono text-[10px] tracking-widest uppercase">
+                    <span style={{ color: T.bone1 }}>{d}</span>
+                    <span style={{ color: T.bone0 }}>{fmtUSD(total)}</span>
+                  </div>
+                  <div className="relative h-1" style={{ background: T.ink3 }}>
+                    <div className="absolute inset-y-0 left-0" style={{ width: `${(total / max) * 100}%`, background: T.plum }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <div style={{ background: T.ink1 }}>
+          <CardHeader title="Community feedback" subtitle="Report a concern" />
+          <div className="px-5 md:px-6 py-4">
+            {sent ? (
+              <div className="flex items-center gap-2 text-sm" style={{ color: T.signal }}>
+                <CheckCircle2 size={15} aria-hidden="true" />
+                Submitted — anchored as a public record.
+              </div>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (feedback.trim()) {
+                    setSent(true);
+                    if (!reduced) setTimeout(() => { setSent(false); setFeedback(""); }, 3200);
+                  }
+                }}
+              >
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  rows={3}
+                  placeholder="Delayed works, environmental concern, abandoned site…"
+                  className="w-full bg-transparent border outline-none p-2.5 text-xs resize-none focus:outline-none focus-visible:ts-focus"
+                  style={{ borderColor: T.ink3, color: T.bone0 }}
+                  aria-label="Community feedback"
+                />
+                <div className="mt-2 flex justify-end">
+                  <Button type="submit" variant="primary" size="sm" iconRight={Send}>
+                    Submit
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: REPORTS
+// ════════════════════════════════════════════════════════════════════════════
+
+function ReportsView() {
+  const statusTone = { ready: "verified", generating: "warn", scheduled: "info" };
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+        <KPI label="Templates" value={REPORT_TEMPLATES.length} sublabel="donor & audit formats" />
+        <KPI label="Reports ready" value={REPORTS.filter((r) => r.status === "ready").length} sublabel="export-ready" />
+        <KPI label="Generating" value={REPORTS.filter((r) => r.status === "generating").length} sublabel="in progress" />
+        <KPI label="Scheduled" value={REPORTS.filter((r) => r.status === "scheduled").length} sublabel="recurring" />
+      </div>
+
+      <div className="col-span-12 lg:col-span-5" style={{ background: T.ink1 }}>
+        <CardHeader title="Report templates" subtitle="Donor-compliant · audit-ready · §6.3.6" />
+        <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+          {REPORT_TEMPLATES.map((t) => (
+            <li key={t.id} className="px-5 md:px-6 py-4 flex items-center gap-3" style={{ borderColor: T.ink3 }}>
+              <ScrollText size={15} style={{ color: T.bone2 }} aria-hidden="true" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm truncate" style={{ color: T.bone0 }}>{t.name}</div>
+                <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                  {t.fmt} · {t.cadence}
+                </div>
+              </div>
+              <Button size="xs" iconLeft={RefreshCw}>Generate</Button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="col-span-12 lg:col-span-7" style={{ background: T.ink1 }}>
+        <CardHeader title="Generated reports" subtitle="Cryptographically chained · export-ready" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead style={{ background: T.ink2 }}>
+              <tr className="border-b" style={{ borderColor: T.ink3 }}>
+                {["Report", "Scope", "Format", "Generated", "Status", ""].map((h, i) => (
+                  <th key={h || i} scope="col" className="text-left px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {REPORTS.map((r) => {
+                const p = PROJECTS.find((x) => x.id === r.pid);
+                return (
+                  <tr key={r.id} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
+                    <td className="px-4 py-3 align-middle">
+                      <div style={{ color: T.bone0 }}>{r.template}</div>
+                      <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>{r.id}</div>
+                    </td>
+                    <td className="px-4 py-3 align-middle font-mono text-[11px] tracking-widest uppercase" style={{ color: T.bone1 }}>
+                      {r.pid === "ALL" ? "Portfolio" : `${p?.flag || ""} ${r.pid}`}
+                    </td>
+                    <td className="px-4 py-3 align-middle"><Chip size="xs">{r.fmt}</Chip></td>
+                    <td className="px-4 py-3 align-middle font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {r.generated}{r.size !== "—" ? ` · ${r.size}` : ""}
+                    </td>
+                    <td className="px-4 py-3 align-middle"><Chip size="xs" tone={statusTone[r.status]}>{r.status}</Chip></td>
+                    <td className="px-4 py-3 align-middle text-right">
+                      <Button size="xs" iconLeft={Download} disabled={r.status !== "ready"}>
+                        Export
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VIEW: ACCESS & IDENTITY
+// ════════════════════════════════════════════════════════════════════════════
+
+function AccessView() {
+  return (
+    <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+      <div className="col-span-12" style={{ background: T.ink1 }}>
+        <CardHeader title="Identity types" subtitle="User & identity layer · §6.2" />
+        <ul className="grid grid-cols-1 md:grid-cols-5 gap-px" style={{ background: T.ink3 }}>
+          {IDENTITY_TYPES.map((it) => (
+            <li key={it.type} className="p-5" style={{ background: T.ink1 }}>
+              <it.icon size={18} style={{ color: T.signal }} aria-hidden="true" />
+              <div className="mt-3 font-serif text-xl tabular-nums" style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: T.bone0 }}>
+                {it.count}
+              </div>
+              <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone1 }}>{it.type}</div>
+              <p className="mt-2 text-[11px] leading-relaxed" style={{ color: T.bone2 }}>{it.ex}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="col-span-12 lg:col-span-7" style={{ background: T.ink1 }}>
+        <CardHeader title="Role-based access control" subtitle="RBAC + ABAC · document & milestone level" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead style={{ background: T.ink2 }}>
+              <tr className="border-b" style={{ borderColor: T.ink3 }}>
+                {["Role", "Tier", "Users", "Scope"].map((h) => (
+                  <th key={h} scope="col" className={`px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap ${h === "Users" ? "text-right" : "text-left"}`} style={{ color: T.bone2 }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {RBAC_ROLES.map((r) => (
+                <tr key={r.role} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
+                  <td className="px-4 py-3 align-middle" style={{ color: T.bone0 }}>{r.role}</td>
+                  <td className="px-4 py-3 align-middle">
+                    <Chip size="xs" tone={r.tier === "L4" ? "verified" : r.tier === "L0" ? "neutral" : "info"}>{r.tier}</Chip>
+                  </td>
+                  <td className="px-4 py-3 align-middle text-right font-mono tabular-nums" style={{ color: T.bone1 }}>{r.users}</td>
+                  <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{r.scope}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="col-span-12 lg:col-span-5" style={{ background: T.ink1 }}>
+        <CardHeader title="4-party verification model" subtitle="No record advances without all four · §7.8" />
+        <ol className="divide-y" style={{ borderColor: T.ink3 }}>
+          {VERIFY_PARTIES.map((v) => (
+            <li key={v.n} className="px-5 md:px-6 py-3.5 flex items-center gap-3" style={{ borderColor: T.ink3 }}>
+              <span className="w-7 h-7 shrink-0 flex items-center justify-center border font-mono text-[11px]" style={{ borderColor: T.signal, color: T.signal }}>
+                {v.n}
+              </span>
+              <v.icon size={15} style={{ color: T.bone2 }} aria-hidden="true" />
+              <div className="min-w-0">
+                <div className="text-sm" style={{ color: T.bone0 }}>{v.party}</div>
+                <div className="text-[11px]" style={{ color: T.bone2 }}>{v.desc}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="col-span-12" style={{ background: T.ink1 }}>
+        <CardHeader title="Active sessions" subtitle="Session governance · device fingerprinting · TLS 1.3" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead style={{ background: T.ink2 }}>
+              <tr className="border-b" style={{ borderColor: T.ink3 }}>
+                {["User", "Role", "Device", "IP", "Location", "Last seen"].map((h) => (
+                  <th key={h} scope="col" className="text-left px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SESSIONS.map((s) => (
+                <tr key={s.user + s.ip} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
+                  <td className="px-4 py-3 align-middle" style={{ color: T.bone0 }}>{s.user}</td>
+                  <td className="px-4 py-3 align-middle font-mono text-[11px] tracking-widest uppercase" style={{ color: T.bone1 }}>{s.role}</td>
+                  <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.device}</td>
+                  <td className="px-4 py-3 align-middle font-mono text-[11px]" style={{ color: T.bone2 }}>{s.ip}</td>
+                  <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.geo}</td>
+                  <td className="px-4 py-3 align-middle font-mono text-[10px] tracking-widest uppercase" style={{ color: s.when === "active now" ? T.signal : T.bone2 }}>
+                    {s.when}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // VIEW SWITCHER
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -4087,6 +5129,86 @@ function ActiveView({ active, onOpenProject, onNavigate }) {
             subtitle="Chronological · cryptographically chained"
           />
           <AuditView onOpenProject={onOpenProject} />
+        </>
+      );
+    case "contracts":
+      return (
+        <>
+          <PageHeader
+            title="Contracts & procurement"
+            subtitle="Registry · amendments · change orders"
+          />
+          <ContractsView onOpenProject={onOpenProject} />
+        </>
+      );
+    case "ledger":
+      return (
+        <>
+          <PageHeader
+            title="Ledger Sync"
+            subtitle="Patent #3 · donor–government–contractor consensus"
+          />
+          <LedgerSyncView onOpenProject={onOpenProject} />
+        </>
+      );
+    case "workflows":
+      return (
+        <>
+          <PageHeader
+            title="Workflow orchestration"
+            subtitle="State-machine routing · escalation · fail-safes"
+          />
+          <WorkflowsView onOpenProject={onOpenProject} />
+        </>
+      );
+    case "signatures":
+      return (
+        <>
+          <PageHeader
+            title="E-Signatures"
+            subtitle="Government-grade · DAG-sequenced · geo-tagged"
+          />
+          <SignaturesView onOpenProject={onOpenProject} />
+        </>
+      );
+    case "risk":
+      return (
+        <>
+          <PageHeader
+            title="AI Risk Prediction"
+            subtitle="Smart alerts · fraud likelihood · ML ensemble"
+          />
+          <RiskView onOpenProject={onOpenProject} />
+        </>
+      );
+    case "portal":
+      return (
+        <>
+          <PageHeader
+            title="Public transparency portal"
+            subtitle="Redacted citizen view · verifiable progress"
+          />
+          <PortalView />
+        </>
+      );
+    case "reports":
+      return (
+        <>
+          <PageHeader
+            title="Reports"
+            subtitle="Donor-compliant · audit-ready · OCDS export"
+          />
+          <ReportsView />
+        </>
+      );
+    case "access":
+      return (
+        <>
+          <PageHeader
+            title="Access & identity"
+            subtitle="RBAC · identity layer · 4-party verification"
+          />
+          <AccessView />
         </>
       );
     default:
