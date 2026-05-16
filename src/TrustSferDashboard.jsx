@@ -1730,7 +1730,7 @@ function AlertsPanel({ open, onClose, onOpenProject }) {
 // PROJECT DETAIL DRAWER
 // ════════════════════════════════════════════════════════════════════════════
 
-function ProjectDrawer({ projectId, onClose, onNavigate }) {
+function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
   const ref = useRef(null);
   const reduced = usePrefersReducedMotion();
   const open = !!projectId;
@@ -1746,8 +1746,8 @@ function ProjectDrawer({ projectId, onClose, onNavigate }) {
   }, [projectId, open]);
 
   const project = useMemo(
-    () => PROJECTS.find((p) => p.id === projectId),
-    [projectId]
+    () => [...extraProjects, ...PROJECTS].find((p) => p.id === projectId),
+    [projectId, extraProjects]
   );
 
   // Live mini-ledger for the drawer
@@ -2485,7 +2485,7 @@ function OverviewView({ onOpenProject, onNavigate }) {
 // VIEW: PROJECTS (Data table)
 // ════════════════════════════════════════════════════════════════════════════
 
-function ProjectsView({ onOpenProject }) {
+function ProjectsView({ onOpenProject, extra = [] }) {
   const [query, setQuery] = useState("");
   const [sectorFilter, setSectorFilter] = useState("ALL");
   const [riskFilter, setRiskFilter] = useState("ALL");
@@ -2493,7 +2493,7 @@ function ProjectsView({ onOpenProject }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return PROJECTS.filter((p) => {
+    return [...extra, ...PROJECTS].filter((p) => {
       if (sectorFilter !== "ALL" && p.sector !== sectorFilter) return false;
       if (riskFilter !== "ALL" && p.risk !== riskFilter) return false;
       if (
@@ -2514,7 +2514,7 @@ function ProjectsView({ onOpenProject }) {
         ? String(ka).localeCompare(String(kb))
         : String(kb).localeCompare(String(ka));
     });
-  }, [query, sectorFilter, riskFilter, sortBy]);
+  }, [query, sectorFilter, riskFilter, sortBy, extra]);
 
   const sortFor = (key) =>
     setSortBy((prev) =>
@@ -5977,10 +5977,311 @@ function SignModal({ signature, onClose, onComplete }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// FLOW: NEW PROJECT
+// ════════════════════════════════════════════════════════════════════════════
+
+const COUNTRY_FLAG = Object.fromEntries(PROJECTS.map((p) => [p.country, p.flag]));
+const RISK_BASE_I3 = { low: 78.5, elevated: 64.0, high: 49.5, critical: 36.0 };
+
+function NewProjectModal({ onClose, onComplete }) {
+  const steps = ["Identity", "Funding", "Schedule", "Review"];
+  const [step, setStep] = useState(0);
+  const [name, setName] = useState("");
+  const [country, setCountry] = useState(PROJECTS[0].country);
+  const [sector, setSector] = useState(SECTORS[0]);
+  const [donor, setDonor] = useState(DONORS[0]);
+  const [ministry, setMinistry] = useState("");
+  const [budget, setBudget] = useState("");
+  const [started, setStarted] = useState("2026-02-01");
+  const [eta, setEta] = useState("2028-12-31");
+  const [risk, setRisk] = useState("low");
+
+  const numBudget = Number(budget) || 0;
+  const canNext =
+    step === 0 ? name.trim() : step === 1 ? ministry.trim() && numBudget > 0 : true;
+
+  const finish = () => {
+    const slug = name.trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3) || "NEW";
+    onComplete({
+      id: `${slug}-${Math.floor(100 + Math.random() * 900)}`,
+      name: name.trim(),
+      country,
+      flag: COUNTRY_FLAG[country] || "🏳️",
+      sector,
+      donor,
+      ministry: ministry.trim(),
+      budget: numBudget,
+      spent: 0,
+      i3: RISK_BASE_I3[risk],
+      risk,
+      progress: 0,
+      started,
+      eta,
+      lastEvent: "just now",
+      alerts: 0,
+      isNew: true,
+    });
+  };
+
+  return (
+    <Modal
+      title="New project"
+      subtitle="Register a project into the portfolio"
+      icon={PlusCircle}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button onClick={step === 0 ? onClose : () => setStep((s) => s - 1)} iconLeft={ChevronLeft}>
+            {step === 0 ? "Cancel" : "Back"}
+          </Button>
+          {step < 3 ? (
+            <Button variant="primary" iconRight={ArrowRight} onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext}>
+              Continue
+            </Button>
+          ) : (
+            <Button variant="primary" iconRight={BadgeCheck} onClick={finish}>
+              Create project
+            </Button>
+          )}
+        </>
+      }
+    >
+      <StepDots steps={steps} current={step} />
+
+      {step === 0 && (
+        <div>
+          <Field label="Project name">
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Eastern Rail Link Phase 2" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Country">
+              <SelectInput value={country} onChange={setCountry} options={[...new Set(PROJECTS.map((p) => p.country))]} />
+            </Field>
+            <Field label="Sector">
+              <SelectInput value={sector} onChange={setSector} options={SECTORS} />
+            </Field>
+          </div>
+        </div>
+      )}
+
+      {step === 1 && (
+        <div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Funding donor">
+              <SelectInput value={donor} onChange={setDonor} options={DONORS} />
+            </Field>
+            <Field label="Budget (USD)" hint={numBudget ? fmtUSD(numBudget) : "Total approved envelope."}>
+              <TextInput value={budget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))} placeholder="0" inputMode="numeric" />
+            </Field>
+          </div>
+          <Field label="Implementing ministry / agency">
+            <TextInput value={ministry} onChange={(e) => setMinistry(e.target.value)} placeholder="e.g. Ministry of Transport" />
+          </Field>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Start date">
+              <TextInput value={started} onChange={(e) => setStarted(e.target.value)} type="date" />
+            </Field>
+            <Field label="Target completion">
+              <TextInput value={eta} onChange={(e) => setEta(e.target.value)} type="date" />
+            </Field>
+          </div>
+          <Field label="Initial risk rating" hint="Sets the baseline i³ Integrity Index until evidence accrues.">
+            <RadioCards
+              value={risk}
+              onChange={setRisk}
+              options={[
+                { value: "low", label: "Low" },
+                { value: "elevated", label: "Elevated" },
+                { value: "high", label: "High" },
+                { value: "critical", label: "Critical" },
+              ]}
+            />
+          </Field>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="border divide-y" style={{ borderColor: T.ink3 }}>
+          {[
+            ["Name", name],
+            ["Country", `${COUNTRY_FLAG[country] || ""} ${country}`],
+            ["Sector", sector],
+            ["Donor", donor],
+            ["Ministry", ministry],
+            ["Budget", fmtUSD(numBudget)],
+            ["Schedule", `${started} → ${eta}`],
+            ["Risk · baseline i³", `${risk} · ${RISK_BASE_I3[risk]}`],
+          ].map(([k, v]) => (
+            <div key={k} className="px-3 py-2.5">
+              <MetaRow label={k} value={v} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FLOW: GENERATE PORTFOLIO BRIEF
+// ════════════════════════════════════════════════════════════════════════════
+
+function GenerateBriefModal({ projects, onClose }) {
+  const reduced = usePrefersReducedMotion();
+  const [ready, setReady] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (reduced) {
+      setReady(true);
+      return;
+    }
+    const t = setTimeout(() => setReady(true), 1300);
+    return () => clearTimeout(t);
+  }, [reduced]);
+
+  const brief = useMemo(() => {
+    const count = projects.length;
+    const budget = projects.reduce((s, p) => s + p.budget, 0);
+    const spent = projects.reduce((s, p) => s + p.spent, 0);
+    const avgI3 = projects.reduce((s, p) => s + p.i3, 0) / count;
+    const atRisk = projects.filter((p) => p.risk === "high" || p.risk === "critical");
+    const countries = new Set(projects.map((p) => p.country)).size;
+    const exec = atRisk.length / count;
+    return {
+      count,
+      budget,
+      spent,
+      avgI3,
+      atRisk,
+      countries,
+      disbursed: spent / budget,
+      narrative: `The portfolio spans ${count} projects across ${countries} countries with a combined approved envelope of ${fmtUSD(
+        budget
+      )}, of which ${fmtUSD(spent)} (${Math.round(
+        (spent / budget) * 100
+      )}%) has been disbursed against verified milestones. The aggregate i³ Integrity Index stands at ${avgI3.toFixed(
+        1
+      )}, indicating ${avgI3 >= 70 ? "broadly healthy" : avgI3 >= 55 ? "mixed" : "strained"} assurance. ${
+        atRisk.length
+          ? `${atRisk.length} project${atRisk.length === 1 ? "" : "s"} carry a high or critical risk rating and warrant escalation: ${atRisk
+              .map((p) => p.id)
+              .join(", ")}.`
+          : "No project currently carries a high or critical risk rating."
+      }`,
+    };
+  }, [projects]);
+
+  const briefText = useMemo(
+    () =>
+      [
+        "TRUSTSFER — PORTFOLIO BRIEF",
+        `Generated ${new Date().toISOString().slice(0, 10)}`,
+        "",
+        brief.narrative,
+        "",
+        `Projects: ${brief.count}`,
+        `Approved budget: ${fmtUSD(brief.budget)}`,
+        `Disbursed: ${fmtUSD(brief.spent)} (${Math.round(brief.disbursed * 100)}%)`,
+        `Average i³: ${brief.avgI3.toFixed(1)}`,
+        `At-risk projects: ${brief.atRisk.length}`,
+      ].join("\n"),
+    [brief]
+  );
+
+  return (
+    <Modal
+      title="Portfolio brief"
+      subtitle="Auto-generated executive summary"
+      icon={FileText}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button onClick={onClose}>Close</Button>
+          <Button
+            variant="primary"
+            iconLeft={copied ? BadgeCheck : Download}
+            disabled={!ready}
+            onClick={() => {
+              try {
+                navigator.clipboard?.writeText(briefText);
+              } catch (e) {
+                /* clipboard unavailable */
+              }
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+          >
+            {copied ? "Copied" : "Copy brief"}
+          </Button>
+        </>
+      }
+    >
+      {!ready ? (
+        <div className="flex flex-col items-center gap-3 py-10">
+          <RefreshCw size={26} className={reduced ? "" : "ts-spin"} style={{ color: T.signal }} aria-hidden="true" />
+          <p className="text-sm" style={{ color: T.bone1 }}>Aggregating ledger state across the portfolio…</p>
+        </div>
+      ) : (
+        <div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-px mb-4" style={{ background: T.ink3 }}>
+            {[
+              ["Projects", String(brief.count)],
+              ["Budget", fmtUSD(brief.budget)],
+              ["Disbursed", `${Math.round(brief.disbursed * 100)}%`],
+              ["Avg i³", brief.avgI3.toFixed(1)],
+            ].map(([k, v]) => (
+              <div key={k} className="p-3" style={{ background: T.ink1 }}>
+                <div className="font-mono text-[9px] tracking-widest uppercase" style={{ color: T.bone2 }}>{k}</div>
+                <div
+                  className="mt-1 font-serif text-lg tabular-nums"
+                  style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: T.bone0 }}
+                >
+                  {v}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[13px] leading-relaxed mb-4" style={{ color: T.bone1 }}>
+            {brief.narrative}
+          </p>
+          {brief.atRisk.length > 0 && (
+            <div>
+              <p className="font-mono text-[10px] tracking-widest uppercase mb-2" style={{ color: T.bone2 }}>
+                Escalation watchlist
+              </p>
+              <ul className="border divide-y" style={{ borderColor: T.ink3 }}>
+                {brief.atRisk.map((p) => (
+                  <li key={p.id} className="px-3 py-2 flex items-center gap-3">
+                    <span className="text-sm flex-1" style={{ color: T.bone0 }}>{p.flag} {p.name}</span>
+                    <Chip size="xs" tone="risk">{p.risk}</Chip>
+                    <span className="font-mono text-[11px] tabular-nums" style={{ color: T.bone2 }}>i³ {p.i3}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // VIEW SWITCHER
 // ════════════════════════════════════════════════════════════════════════════
 
-function ActiveView({ active, onOpenProject, onNavigate }) {
+function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProject }) {
+  const [newProjOpen, setNewProjOpen] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(false);
+  const allProjects = [...extraProjects, ...PROJECTS];
   const PageHeader = ({ title, subtitle, action }) => (
     <div className="mb-5 md:mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -6011,13 +6312,30 @@ function ActiveView({ active, onOpenProject, onNavigate }) {
     case "overview":
       return (
         <>
+          {newProjOpen && (
+            <NewProjectModal
+              onClose={() => setNewProjOpen(false)}
+              onComplete={(p) => {
+                addProject(p);
+                setNewProjOpen(false);
+                onNavigate("projects");
+              }}
+            />
+          )}
+          {briefOpen && (
+            <GenerateBriefModal projects={allProjects} onClose={() => setBriefOpen(false)} />
+          )}
           <PageHeader
             title="Portfolio overview"
-            subtitle={`${PROJECTS.length} active projects · 14 countries · 5 donors`}
+            subtitle={`${allProjects.length} active projects · ${
+              new Set(allProjects.map((p) => p.country)).size
+            } countries · 5 donors`}
             action={
               <div className="flex items-center gap-2">
-                <Button iconLeft={PlusCircle}>New project</Button>
-                <Button variant="primary" iconRight={ArrowUpRight}>
+                <Button iconLeft={PlusCircle} onClick={() => setNewProjOpen(true)}>
+                  New project
+                </Button>
+                <Button variant="primary" iconRight={ArrowUpRight} onClick={() => setBriefOpen(true)}>
                   Generate brief
                 </Button>
               </div>
@@ -6033,7 +6351,7 @@ function ActiveView({ active, onOpenProject, onNavigate }) {
             title="Projects"
             subtitle="Sortable register · click a row for full record"
           />
-          <ProjectsView onOpenProject={onOpenProject} />
+          <ProjectsView onOpenProject={onOpenProject} extra={extraProjects} />
         </>
       );
     case "evidence":
@@ -6202,6 +6520,11 @@ export default function TrustSferDashboard() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [openProjectId, setOpenProjectId] = useState(null);
+  const [extraProjects, setExtraProjects] = useState([]);
+
+  const addProject = useCallback((p) => {
+    setExtraProjects((prev) => [p, ...prev]);
+  }, []);
 
   const onNavigate = useCallback((id) => {
     setActive(id);
@@ -6347,6 +6670,8 @@ export default function TrustSferDashboard() {
               active={active}
               onOpenProject={onOpenProject}
               onNavigate={onNavigate}
+              extraProjects={extraProjects}
+              addProject={addProject}
             />
           </main>
         </div>
@@ -6370,6 +6695,7 @@ export default function TrustSferDashboard() {
 
       <ProjectDrawer
         projectId={openProjectId}
+        extraProjects={extraProjects}
         onClose={() => setOpenProjectId(null)}
         onNavigate={onNavigate}
       />
