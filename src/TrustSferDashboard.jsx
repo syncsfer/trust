@@ -256,6 +256,323 @@ const i3Tone = (s) =>
   s >= 80 ? "verified" : s >= 65 ? "warn" : "risk";
 
 // ════════════════════════════════════════════════════════════════════════════
+// FILE EXPORT HELPERS
+// ════════════════════════════════════════════════════════════════════════════
+
+function downloadFile(name, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function toCSV(headers, rows) {
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [headers.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))].join("\n");
+}
+
+// Minimal single-page PDF writer — enough for text reports without a library.
+function makePdf(title, lines) {
+  const esc = (s) =>
+    String(s)
+      .replace(/[^\x20-\x7E]/g, "")
+      .replace(/\\/g, "\\\\")
+      .replace(/\(/g, "\\(")
+      .replace(/\)/g, "\\)");
+  const text = [
+    `BT /F1 14 Tf 50 760 Td (${esc(title)}) Tj ET`,
+    "BT /F1 9 Tf 50 736 Td 13 TL",
+    ...lines.slice(0, 50).map((l) => `(${esc(l)}) Tj T*`),
+    "ET",
+  ].join("\n");
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets = [];
+  objs.forEach((body, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((o) => {
+    out += `${String(o).padStart(10, "0")} 00000 n \n`;
+  });
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// APP STORE — global state, persisted to localStorage
+// ════════════════════════════════════════════════════════════════════════════
+
+const LS_KEY = "trustsfer-workspace-v1";
+
+const EMPTY_STORE = {
+  projects: [],
+  evidence: [],
+  auditEvents: [],
+  contracts: [],
+  invites: [],
+  reports: [],
+  sigOverrides: {},
+  approvals: {},
+  dismissedConflicts: [],
+  changeOrders: {},
+};
+
+function loadStore() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return EMPTY_STORE;
+    const parsed = { ...EMPTY_STORE, ...JSON.parse(raw) };
+    // A report stuck mid-generation across a reload resolves to ready.
+    parsed.reports = parsed.reports.map((r) =>
+      r.status === "generating" ? { ...r, status: "ready" } : r
+    );
+    return parsed;
+  } catch (e) {
+    return EMPTY_STORE;
+  }
+}
+
+function storeReducer(state, action) {
+  switch (action.type) {
+    case "ADD_PROJECT":
+      return { ...state, projects: [action.payload, ...state.projects] };
+    case "ADD_EVIDENCE":
+      return { ...state, evidence: [action.payload, ...state.evidence].slice(0, 200) };
+    case "ADD_AUDIT":
+      return { ...state, auditEvents: [action.payload, ...state.auditEvents].slice(0, 200) };
+    case "ADD_CONTRACT":
+      return { ...state, contracts: [action.payload, ...state.contracts] };
+    case "ADD_INVITE":
+      return { ...state, invites: [action.payload, ...state.invites] };
+    case "ADD_REPORT":
+      return { ...state, reports: [action.payload, ...state.reports] };
+    case "UPDATE_REPORT":
+      return {
+        ...state,
+        reports: state.reports.map((r) => (r.id === action.id ? { ...r, ...action.patch } : r)),
+      };
+    case "SET_SIGNATURE":
+      return { ...state, sigOverrides: { ...state.sigOverrides, [action.id]: action.status } };
+    case "DECIDE_APPROVAL":
+      return { ...state, approvals: { ...state.approvals, [action.id]: action.choice } };
+    case "DISMISS_CONFLICT":
+      return state.dismissedConflicts.includes(action.id)
+        ? state
+        : { ...state, dismissedConflicts: [...state.dismissedConflicts, action.id] };
+    case "DECIDE_CHANGE_ORDER":
+      return { ...state, changeOrders: { ...state.changeOrders, [action.id]: action.status } };
+    case "RESET":
+      return EMPTY_STORE;
+    default:
+      return state;
+  }
+}
+
+const StoreContext = React.createContext(null);
+const useStore = () => React.useContext(StoreContext);
+
+function StoreProvider({ children }) {
+  const [state, dispatch] = useReducer(storeReducer, undefined, loadStore);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+    } catch (e) {
+      /* storage full or unavailable — app keeps working in-memory */
+    }
+  }, [state]);
+
+  const api = useMemo(() => {
+    const logAudit = (ev) =>
+      dispatch({
+        type: "ADD_AUDIT",
+        payload: { id: `a${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ts: "just now", ...ev },
+      });
+
+    const auditCtx = (pid) => {
+      const p = [...(state.projects || []), ...PROJECTS].find((x) => x.id === pid);
+      return { pid, flag: p?.flag || "🏳️", country: p?.country || "—" };
+    };
+
+    return {
+      addProject(p) {
+        dispatch({ type: "ADD_PROJECT", payload: p });
+        logAudit({
+          pid: p.id, flag: p.flag, country: p.country,
+          actor: "Portfolio Admin · console",
+          label: "MILESTONE", tone: "info",
+          text: `Registered project "${p.name}" — ${fmtUSD(p.budget)} envelope, donor ${p.donor}.`,
+          hash: fauxHash(`proj-${p.id}`),
+        });
+      },
+      addEvidence(d) {
+        dispatch({
+          type: "ADD_EVIDENCE",
+          payload: {
+            id: `u${Date.now()}`, kind: d.kind, actor: d.actor, pid: d.pid,
+            country: d.country, flag: d.flag, hash: d.cle, block: d.block,
+            t: "now", isNew: true,
+          },
+        });
+        logAudit({
+          ...auditCtx(d.pid),
+          flag: d.flag, country: d.country,
+          actor: `${d.actor} · field upload`,
+          label: d.kind, tone: d.kind === "EVIDENCE" ? "verified" : d.kind === "PAYMENT" ? "plum" : "info",
+          text: `Anchored ${d.files.length} evidence file${d.files.length === 1 ? "" : "s"} for ${d.milestone} — CLE created and Merkle-batched.`,
+          hash: d.cle,
+        });
+      },
+      addContract(c) {
+        dispatch({ type: "ADD_CONTRACT", payload: c });
+        logAudit({
+          ...auditCtx(c.pid),
+          actor: "Procurement Lead · console",
+          label: "MILESTONE", tone: "plum",
+          text: `Awarded contract "${c.title}" to ${c.contractor} — ${fmtUSD(c.value)} via ${c.method}.`,
+          hash: fauxHash(`ct-${c.id}`),
+        });
+      },
+      addInvite(inv) {
+        dispatch({ type: "ADD_INVITE", payload: inv });
+        logAudit({
+          ...auditCtx(inv.project),
+          actor: "Identity Admin · console",
+          label: "APPROVAL", tone: "info",
+          text: `Invited ${inv.org} (${inv.type}) as ${inv.role} · ${inv.tier} on ${inv.project}.`,
+          hash: fauxHash(`inv-${inv.id}`),
+        });
+      },
+      setSignature(id, status, doc, pid) {
+        dispatch({ type: "SET_SIGNATURE", id, status });
+        logAudit({
+          ...auditCtx(pid),
+          actor: "You · e-signature engine",
+          label: "APPROVAL", tone: status === "signed" ? "verified" : "risk",
+          text: `${status === "signed" ? "Signed" : "Declined"} "${doc}" — provenance hash anchored.`,
+          hash: fauxHash(`sig-${id}-${status}`),
+        });
+      },
+      decideApproval(id, choice, title, pid) {
+        dispatch({ type: "DECIDE_APPROVAL", id, choice });
+        logAudit({
+          ...auditCtx(pid),
+          actor: "You · approvals queue",
+          label: "APPROVAL", tone: choice === "approved" ? "verified" : "risk",
+          text: `${choice === "approved" ? "Approved" : "Returned"} "${title}" (${id}).`,
+          hash: fauxHash(`decision-${id}-${choice}`),
+        });
+      },
+      dismissConflict(id, title, pid) {
+        dispatch({ type: "DISMISS_CONFLICT", id });
+        logAudit({
+          ...auditCtx(pid),
+          actor: "You · conflict triage",
+          label: "AMENDMENT", tone: "warn",
+          text: `Dismissed conflict ${id} — "${title}" marked reviewed, no action.`,
+          hash: fauxHash(`dismiss-${id}`),
+        });
+      },
+      decideChangeOrder(id, status, title, pid) {
+        dispatch({ type: "DECIDE_CHANGE_ORDER", id, status });
+        logAudit({
+          ...auditCtx(pid),
+          actor: "You · contract administration",
+          label: "AMENDMENT", tone: status === "approved" ? "verified" : "risk",
+          text: `Change order ${id} ${status} — "${title}".`,
+          hash: fauxHash(`co-${id}-${status}`),
+        });
+      },
+      generateReport(tpl, pid = "ALL") {
+        const id = `RPT-${Math.floor(3000 + Math.random() * 6000)}`;
+        dispatch({
+          type: "ADD_REPORT",
+          payload: {
+            id, template: tpl.name, pid, generated: "—",
+            fmt: tpl.fmt, status: "generating", size: "—",
+          },
+        });
+        // Provider outlives view switches, so the timer always lands.
+        setTimeout(() => {
+          dispatch({
+            type: "UPDATE_REPORT", id,
+            patch: {
+              status: "ready", generated: "just now",
+              size: `${(0.4 + Math.random() * 3).toFixed(1)} MB`,
+            },
+          });
+        }, 1400);
+        logAudit({
+          pid: "ALL", flag: "🌐", country: "Portfolio",
+          actor: "You · reporting engine",
+          label: "MILESTONE", tone: "info",
+          text: `Generated "${tpl.name}" (${tpl.fmt}).`,
+          hash: fauxHash(`rpt-${id}`),
+        });
+        return id;
+      },
+      logAudit,
+      reset() {
+        dispatch({ type: "RESET" });
+      },
+    };
+  }, [state.projects]);
+
+  const value = useMemo(() => ({ ...api, state }), [api, state]);
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+}
+
+// Builds the export payload for a generated report in its native format.
+function buildReportFile(report, allProjects) {
+  const rows = allProjects.map((p) => [
+    p.id, p.name, p.country, p.sector, p.donor, p.budget, p.spent, p.i3, p.risk, p.progress,
+  ]);
+  const headers = ["id", "name", "country", "sector", "donor", "budget", "spent", "i3", "risk", "progress"];
+  const stamp = new Date().toISOString().slice(0, 10);
+  const base = `${report.id}_${stamp}`;
+  if (report.fmt === "JSON") {
+    return {
+      name: `${base}.json`, mime: "application/json",
+      content: JSON.stringify({ report: report.template, generated: stamp, projects: allProjects }, null, 2),
+    };
+  }
+  if (report.fmt === "PDF") {
+    return {
+      name: `${base}.pdf`, mime: "application/pdf",
+      content: makePdf(`${report.template} — ${stamp}`, [
+        `Scope: ${report.pid === "ALL" ? "Full portfolio" : report.pid}`,
+        `Projects: ${allProjects.length}`,
+        `Approved budget: ${fmtUSD(allProjects.reduce((s, p) => s + p.budget, 0))}`,
+        `Disbursed: ${fmtUSD(allProjects.reduce((s, p) => s + p.spent, 0))}`,
+        "",
+        ...allProjects.map(
+          (p) => `${p.id}  ${p.name} — ${p.country} · ${fmtUSD(p.budget)} · i3 ${p.i3} · ${p.risk}`
+        ),
+      ]),
+    };
+  }
+  // CSV and XLSX both export as CSV (Excel-compatible, no binary writer needed).
+  return { name: `${base}.csv`, mime: "text/csv", content: toCSV(headers, rows) };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // MOCK DATA
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -1609,10 +1926,13 @@ function CommandPalette({ open, onClose, onNavigate, onOpenProject }) {
 
 function AlertsPanel({ open, onClose, onOpenProject }) {
   const ref = useRef(null);
+  const store = useStore();
   useFocusTrap(ref, open);
   useKey("Escape", () => open && onClose(), [open, onClose]);
   if (!open) return null;
-  const sorted = [...CONFLICTS].sort((a, b) => {
+  const sorted = CONFLICTS.filter(
+    (c) => !store.state.dismissedConflicts.includes(c.id)
+  ).sort((a, b) => {
     const order = { high: 0, med: 1, low: 2 };
     return order[a.severity] - order[b.severity];
   });
@@ -1808,7 +2128,7 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
     return out;
   }, [project]);
 
-  if (!open) return null;
+  if (!open || !project) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex justify-end"
@@ -2160,7 +2480,27 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
               >
                 Project conflicts
               </Button>
-              <Button size="md" iconLeft={Download}>
+              <Button
+                size="md"
+                iconLeft={Download}
+                onClick={() =>
+                  downloadFile(
+                    `audit_pack_${project.id}.pdf`,
+                    makePdf(`Audit Pack — ${project.id}`, [
+                      `Project: ${project.name}`,
+                      `Country: ${project.country} · Sector: ${project.sector}`,
+                      `Donor: ${project.donor} · Ministry: ${project.ministry}`,
+                      `Budget: ${fmtUSD(project.budget)} · Spent: ${fmtUSD(project.spent)}`,
+                      `i3 Integrity Index: ${project.i3} · Risk: ${project.risk}`,
+                      `Progress: ${project.progress}% · ${project.started} -> ${project.eta}`,
+                      `Open alerts: ${project.alerts}`,
+                      "",
+                      `Ledger anchor: ${fauxHash(`pack-${project.id}`)}`,
+                    ]),
+                    "application/pdf"
+                  )
+                }
+              >
                 Export audit pack
               </Button>
             </div>
@@ -2176,22 +2516,26 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function OverviewView({ onOpenProject, onNavigate }) {
+  const store = useStore();
+  const all = useMemo(
+    () => [...store.state.projects, ...PROJECTS],
+    [store.state.projects]
+  );
   const totals = useMemo(() => {
-    const budget = PROJECTS.reduce((s, p) => s + p.budget, 0);
-    const spent = PROJECTS.reduce((s, p) => s + p.spent, 0);
-    const avgI3 =
-      PROJECTS.reduce((s, p) => s + p.i3, 0) / PROJECTS.length;
-    const highRisk = PROJECTS.filter((p) => p.risk === "high").length;
-    return { budget, spent, avgI3, highRisk, count: PROJECTS.length };
-  }, []);
+    const budget = all.reduce((s, p) => s + p.budget, 0);
+    const spent = all.reduce((s, p) => s + p.spent, 0);
+    const avgI3 = all.reduce((s, p) => s + p.i3, 0) / all.length;
+    const highRisk = all.filter((p) => p.risk === "high").length;
+    return { budget, spent, avgI3, highRisk, count: all.length };
+  }, [all]);
 
   const sectorMix = useMemo(() => {
     const m = {};
-    PROJECTS.forEach((p) => {
+    all.forEach((p) => {
       m[p.sector] = (m[p.sector] || 0) + p.budget;
     });
     return Object.entries(m).map(([k, v]) => ({ name: k, value: v }));
-  }, []);
+  }, [all]);
 
   const trend = useMemo(() => {
     return Array.from({ length: 12 }).map((_, i) => ({
@@ -2202,8 +2546,8 @@ function OverviewView({ onOpenProject, onNavigate }) {
   }, []);
 
   const topRisk = useMemo(
-    () => [...PROJECTS].sort((a, b) => a.i3 - b.i3).slice(0, 5),
-    []
+    () => [...all].sort((a, b) => a.i3 - b.i3).slice(0, 5),
+    [all]
   );
 
   return (
@@ -2603,7 +2947,21 @@ function ProjectsView({ onOpenProject, extra = [] }) {
             onChange={setRiskFilter}
             options={["ALL", ...RISKS]}
           />
-          <Button iconLeft={Download}>Export</Button>
+          <Button
+            iconLeft={Download}
+            onClick={() =>
+              downloadFile(
+                `projects_${new Date().toISOString().slice(0, 10)}.csv`,
+                toCSV(
+                  ["id", "name", "country", "sector", "donor", "budget", "spent", "i3", "risk", "progress", "started", "eta"],
+                  filtered.map((p) => [p.id, p.name, p.country, p.sector, p.donor, p.budget, p.spent, p.i3, p.risk, p.progress, p.started, p.eta])
+                ),
+                "text/csv"
+              )
+            }
+          >
+            Export
+          </Button>
         </div>
       </div>
 
@@ -2783,6 +3141,7 @@ function Select({ label, value, onChange, options }) {
 
 function EvidenceView({ onOpenProject }) {
   const reduced = usePrefersReducedMotion();
+  const store = useStore();
   const [entries, setEntries] = useState([]);
   const [filter, setFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -2845,7 +3204,7 @@ function EvidenceView({ onOpenProject }) {
     return () => clearInterval(t);
   }, [reduced, loading]);
 
-  const filtered = entries.filter((e) => {
+  const filtered = [...store.state.evidence, ...entries].filter((e) => {
     if (filter !== "ALL" && e.kind !== filter) return false;
     const q = search.trim().toLowerCase();
     if (
@@ -2896,7 +3255,21 @@ function EvidenceView({ onOpenProject }) {
               aria-label="Filter ledger"
             />
           </div>
-          <Button iconLeft={Download}>Export CSV</Button>
+          <Button
+            iconLeft={Download}
+            onClick={() =>
+              downloadFile(
+                `evidence_ledger_${new Date().toISOString().slice(0, 10)}.csv`,
+                toCSV(
+                  ["id", "kind", "actor", "project", "country", "hash", "block", "time"],
+                  filtered.map((e) => [e.id, e.kind, e.actor, e.pid, e.country, e.hash, e.block, e.t])
+                ),
+                "text/csv"
+              )
+            }
+          >
+            Export CSV
+          </Button>
           <Button variant="primary" iconLeft={PlusCircle} onClick={() => setUploadOpen(true)}>
             Submit evidence
           </Button>
@@ -2906,23 +3279,7 @@ function EvidenceView({ onOpenProject }) {
         <UploadEvidenceModal
           onClose={() => setUploadOpen(false)}
           onComplete={(d) => {
-            setEntries((prev) =>
-              [
-                {
-                  id: `u${Date.now()}`,
-                  kind: d.kind,
-                  actor: d.actor,
-                  pid: d.pid,
-                  country: d.country,
-                  flag: d.flag,
-                  hash: d.cle,
-                  block: d.block,
-                  t: "now",
-                  isNew: true,
-                },
-                ...prev,
-              ].slice(0, 80)
-            );
+            store.addEvidence(d);
             setUploadOpen(false);
           }}
         />
@@ -3343,7 +3700,7 @@ function I3RadialGauge({ value }) {
   const titleId = useId();
   return (
     <svg viewBox="0 0 200 200" width="100%" style={{ maxWidth: 220 }} role="img">
-      <title id={titleId}>Portfolio integrity score {pct.toFixed(1)} out of 100</title>
+      <title id={titleId}>{`Portfolio integrity score ${pct.toFixed(1)} out of 100`}</title>
       <g transform="rotate(135 100 100)">
         <circle
           cx="100"
@@ -3398,9 +3755,11 @@ function I3RadialGauge({ value }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ConflictsView({ onOpenProject }) {
+  const store = useStore();
   const [sev, setSev] = useState("ALL");
   const [kind, setKind] = useState("ALL");
-  const filtered = CONFLICTS.filter(
+  const live = CONFLICTS.filter((c) => !store.state.dismissedConflicts.includes(c.id));
+  const filtered = live.filter(
     (c) =>
       (sev === "ALL" || c.severity === sev) &&
       (kind === "ALL" || c.kind === kind)
@@ -3488,7 +3847,7 @@ function ConflictsView({ onOpenProject }) {
                   <Button size="sm" onClick={() => onOpenProject(c.pid)} iconRight={ArrowRight}>
                     Investigate
                   </Button>
-                  <Button size="sm" variant="quiet">
+                  <Button size="sm" variant="quiet" onClick={() => store.dismissConflict(c.id, c.title, c.pid)}>
                     Dismiss
                   </Button>
                 </div>
@@ -3505,9 +3864,24 @@ function ConflictsView({ onOpenProject }) {
           className="font-mono text-[10px] tracking-widest uppercase"
           style={{ color: T.bone2 }}
         >
-          {filtered.length} of {CONFLICTS.length} conflicts
+          {filtered.length} of {live.length} active · {store.state.dismissedConflicts.length} dismissed
         </span>
-        <Button size="xs" iconLeft={Download}>Export queue</Button>
+        <Button
+          size="xs"
+          iconLeft={Download}
+          onClick={() =>
+            downloadFile(
+              `conflict_queue_${new Date().toISOString().slice(0, 10)}.csv`,
+              toCSV(
+                ["id", "project", "severity", "kind", "title", "description", "detected"],
+                filtered.map((c) => [c.id, c.pid, c.severity, c.kind, c.title, c.desc, c.detected])
+              ),
+              "text/csv"
+            )
+          }
+        >
+          Export queue
+        </Button>
       </div>
     </Card>
   );
@@ -3518,9 +3892,11 @@ function ConflictsView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ApprovalsView({ onOpenProject }) {
-  const [decided, setDecided] = useState({});
+  const store = useStore();
+  const decided = store.state.approvals;
   const decide = (id, choice) => {
-    setDecided((prev) => ({ ...prev, [id]: choice }));
+    const a = APPROVALS.find((x) => x.id === id);
+    store.decideApproval(id, choice, a?.title || id, a?.pid);
   };
   const queue = APPROVALS;
   const pending = queue.filter((a) => !decided[a.id]);
@@ -3920,8 +4296,9 @@ function GeoView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function AuditView({ onOpenProject }) {
+  const store = useStore();
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [extra, setExtra] = useState([]);
+  const extra = store.state.auditEvents;
   const events = useMemo(() => {
     const types = [
       { label: "EVIDENCE", tone: "verified" },
@@ -3965,8 +4342,22 @@ function AuditView({ onOpenProject }) {
         subtitle="Chronological · cryptographically chained · export-ready"
         right={
           <>
-            <Button size="xs" iconLeft={Calendar}>Range</Button>
-            <Button size="xs" iconLeft={Download}>Export</Button>
+            <Button
+              size="xs"
+              iconLeft={Download}
+              onClick={() =>
+                downloadFile(
+                  `audit_trail_${new Date().toISOString().slice(0, 10)}.csv`,
+                  toCSV(
+                    ["id", "time", "project", "country", "actor", "type", "event", "hash"],
+                    allEvents.map((e) => [e.id, e.ts, e.pid, e.country, e.actor, e.label, e.text, e.hash])
+                  ),
+                  "text/csv"
+                )
+              }
+            >
+              Export
+            </Button>
             <Button size="xs" variant="primary" iconLeft={PlusCircle} onClick={() => setUploadOpen(true)}>
               Log evidence
             </Button>
@@ -3977,21 +4368,7 @@ function AuditView({ onOpenProject }) {
         <UploadEvidenceModal
           onClose={() => setUploadOpen(false)}
           onComplete={(d) => {
-            setExtra((prev) => [
-              {
-                id: `a${Date.now()}`,
-                ts: "just now",
-                pid: d.pid,
-                flag: d.flag,
-                country: d.country,
-                actor: `${d.actor} · field upload`,
-                label: d.kind,
-                tone: d.kind === "EVIDENCE" ? "verified" : d.kind === "PAYMENT" ? "plum" : "info",
-                text: `Anchored ${d.files.length} evidence file${d.files.length === 1 ? "" : "s"} for ${d.milestone} — CLE created and Merkle-batched.`,
-                hash: d.cle,
-              },
-              ...prev,
-            ]);
+            store.addEvidence(d);
             setUploadOpen(false);
           }}
         />
@@ -4266,10 +4643,10 @@ function WorkflowStepper({ stage, blocked }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ContractsView({ onOpenProject }) {
+  const store = useStore();
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [newOpen, setNewOpen] = useState(false);
-  const [extra, setExtra] = useState([]);
-  const all = [...extra, ...CONTRACTS];
+  const all = [...store.state.contracts, ...CONTRACTS];
   const totalValue = all.reduce((s, c) => s + c.value, 0);
   const active = all.filter((c) => c.status === "active").length;
   const amendTotal = all.reduce((s, c) => s + c.amendments, 0);
@@ -4290,7 +4667,7 @@ function ContractsView({ onOpenProject }) {
         <NewContractModal
           onClose={() => setNewOpen(false)}
           onComplete={(c) => {
-            setExtra((prev) => [c, ...prev]);
+            store.addContract(c);
             setNewOpen(false);
           }}
         />
@@ -4299,7 +4676,11 @@ function ContractsView({ onOpenProject }) {
         <KPI label="Contract value" value={fmtUSD(totalValue)} sublabel={`${all.length} contracts`} />
         <KPI label="Active contracts" value={active} sublabel="under execution" />
         <KPI label="Amendments" value={amendTotal} delta={3.0} sublabel="cumulative variations" />
-        <KPI label="Change orders" value={CHANGE_ORDERS.filter((c) => c.status === "pending").length} sublabel="pending decision" />
+        <KPI
+          label="Change orders"
+          value={CHANGE_ORDERS.filter((c) => (store.state.changeOrders[c.id] || c.status) === "pending").length}
+          sublabel="pending decision"
+        />
       </div>
 
       <div className="col-span-12" style={{ background: T.ink1 }}>
@@ -4394,13 +4775,14 @@ function ContractsView({ onOpenProject }) {
         <ul className="divide-y" style={{ borderColor: T.ink3 }}>
           {CHANGE_ORDERS.map((c) => {
             const p = PROJECTS.find((x) => x.id === c.pid);
+            const status = store.state.changeOrders[c.id] || c.status;
             return (
               <li key={c.id} className="px-5 md:px-6 py-4 flex flex-col md:flex-row md:items-center gap-4" style={{ borderColor: T.ink3 }}>
                 <Chip
-                  tone={c.status === "approved" ? "verified" : c.status === "disputed" ? "risk" : "warn"}
+                  tone={status === "approved" ? "verified" : status === "disputed" || status === "rejected" ? "risk" : "warn"}
                   size="xs"
                 >
-                  {c.status}
+                  {status}
                 </Chip>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm" style={{ color: T.bone0 }}>{c.title}</p>
@@ -4414,6 +4796,16 @@ function ContractsView({ onOpenProject }) {
                 >
                   {fmtSigned(c.delta)}
                 </span>
+                {status === "pending" && (
+                  <span className="shrink-0 flex items-center gap-2">
+                    <Button size="xs" variant="danger" onClick={() => store.decideChangeOrder(c.id, "rejected", c.title, c.pid)}>
+                      Reject
+                    </Button>
+                    <Button size="xs" variant="primary" iconLeft={BadgeCheck} onClick={() => store.decideChangeOrder(c.id, "approved", c.title, c.pid)}>
+                      Approve
+                    </Button>
+                  </span>
+                )}
               </li>
             );
           })}
@@ -4508,8 +4900,13 @@ function WorkflowsView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function SignaturesView({ onOpenProject }) {
-  const [sigs, setSigs] = useState(SIGNATURES);
+  const store = useStore();
   const [target, setTarget] = useState(null);
+  const sigs = SIGNATURES.map((s) =>
+    store.state.sigOverrides[s.id]
+      ? { ...s, status: store.state.sigOverrides[s.id], when: "this session" }
+      : s
+  );
   const pending = sigs.filter((s) => s.status === "pending").length;
   const signed = sigs.filter((s) => s.status === "signed").length;
   const statusTone = { pending: "warn", signed: "verified", declined: "risk" };
@@ -4519,11 +4916,7 @@ function SignaturesView({ onOpenProject }) {
         <SignModal
           signature={target}
           onClose={() => setTarget(null)}
-          onComplete={(id, choice) =>
-            setSigs((prev) =>
-              prev.map((s) => (s.id === id ? { ...s, status: choice, when: "just now" } : s))
-            )
-          }
+          onComplete={(id, choice) => store.setSignature(id, choice, target.doc, target.pid)}
         />
       )}
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
@@ -4920,14 +5313,17 @@ function PortalView() {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ReportsView() {
+  const store = useStore();
   const statusTone = { ready: "verified", generating: "warn", scheduled: "info" };
+  const reports = [...store.state.reports, ...REPORTS];
+  const allProjects = [...store.state.projects, ...PROJECTS];
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
         <KPI label="Templates" value={REPORT_TEMPLATES.length} sublabel="donor & audit formats" />
-        <KPI label="Reports ready" value={REPORTS.filter((r) => r.status === "ready").length} sublabel="export-ready" />
-        <KPI label="Generating" value={REPORTS.filter((r) => r.status === "generating").length} sublabel="in progress" />
-        <KPI label="Scheduled" value={REPORTS.filter((r) => r.status === "scheduled").length} sublabel="recurring" />
+        <KPI label="Reports ready" value={reports.filter((r) => r.status === "ready").length} sublabel="export-ready" />
+        <KPI label="Generating" value={reports.filter((r) => r.status === "generating").length} sublabel="in progress" />
+        <KPI label="Scheduled" value={reports.filter((r) => r.status === "scheduled").length} sublabel="recurring" />
       </div>
 
       <div className="col-span-12 lg:col-span-5" style={{ background: T.ink1 }}>
@@ -4942,7 +5338,9 @@ function ReportsView() {
                   {t.fmt} · {t.cadence}
                 </div>
               </div>
-              <Button size="xs" iconLeft={RefreshCw}>Generate</Button>
+              <Button size="xs" iconLeft={RefreshCw} onClick={() => store.generateReport(t)}>
+                Generate
+              </Button>
             </li>
           ))}
         </ul>
@@ -4962,8 +5360,8 @@ function ReportsView() {
               </tr>
             </thead>
             <tbody>
-              {REPORTS.map((r) => {
-                const p = PROJECTS.find((x) => x.id === r.pid);
+              {reports.map((r) => {
+                const p = allProjects.find((x) => x.id === r.pid);
                 return (
                   <tr key={r.id} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
                     <td className="px-4 py-3 align-middle">
@@ -4979,7 +5377,15 @@ function ReportsView() {
                     </td>
                     <td className="px-4 py-3 align-middle"><Chip size="xs" tone={statusTone[r.status]}>{r.status}</Chip></td>
                     <td className="px-4 py-3 align-middle text-right">
-                      <Button size="xs" iconLeft={Download} disabled={r.status !== "ready"}>
+                      <Button
+                        size="xs"
+                        iconLeft={Download}
+                        disabled={r.status !== "ready"}
+                        onClick={() => {
+                          const f = buildReportFile(r, allProjects);
+                          downloadFile(f.name, f.content, f.mime);
+                        }}
+                      >
                         Export
                       </Button>
                     </td>
@@ -4999,15 +5405,17 @@ function ReportsView() {
 // ════════════════════════════════════════════════════════════════════════════
 
 function AccessView() {
+  const store = useStore();
   const [onboardOpen, setOnboardOpen] = useState(false);
-  const [invites, setInvites] = useState([]);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const invites = store.state.invites;
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
       {onboardOpen && (
         <OnboardModal
           onClose={() => setOnboardOpen(false)}
           onComplete={(inv) => {
-            setInvites((prev) => [inv, ...prev]);
+            store.addInvite(inv);
             setOnboardOpen(false);
           }}
         />
@@ -5017,9 +5425,26 @@ function AccessView() {
           title="Identity types"
           subtitle="User & identity layer · §6.2"
           right={
-            <Button variant="primary" iconLeft={PlusCircle} onClick={() => setOnboardOpen(true)}>
-              Onboard third party
-            </Button>
+            <>
+              <Button
+                variant={confirmReset ? "danger" : "ghost"}
+                iconLeft={RefreshCw}
+                onClick={() => {
+                  if (confirmReset) {
+                    store.reset();
+                    setConfirmReset(false);
+                  } else {
+                    setConfirmReset(true);
+                    setTimeout(() => setConfirmReset(false), 4000);
+                  }
+                }}
+              >
+                {confirmReset ? "Confirm reset" : "Reset workspace"}
+              </Button>
+              <Button variant="primary" iconLeft={PlusCircle} onClick={() => setOnboardOpen(true)}>
+                Onboard third party
+              </Button>
+            </>
           }
         />
         <ul className="grid grid-cols-1 md:grid-cols-5 gap-px" style={{ background: T.ink3 }}>
@@ -6514,20 +6939,38 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
 // ════════════════════════════════════════════════════════════════════════════
 
 export default function TrustSferDashboard() {
-  const [active, setActive] = useState("overview");
+  return (
+    <StoreProvider>
+      <DashboardShell />
+    </StoreProvider>
+  );
+}
+
+const viewFromHash = () => {
+  const h = window.location.hash.replace(/^#\/?/, "");
+  return MODULES.some((m) => m.id === h) ? h : "overview";
+};
+
+function DashboardShell() {
+  const store = useStore();
+  const [active, setActive] = useState(viewFromHash);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [openProjectId, setOpenProjectId] = useState(null);
-  const [extraProjects, setExtraProjects] = useState([]);
+  const extraProjects = store.state.projects;
 
-  const addProject = useCallback((p) => {
-    setExtraProjects((prev) => [p, ...prev]);
+  // Hash routing: views are linkable and the back button works.
+  useEffect(() => {
+    const onHash = () => setActive(viewFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   const onNavigate = useCallback((id) => {
     setActive(id);
+    if (window.location.hash !== `#/${id}`) window.location.hash = `#/${id}`;
     setMobileOpen(false);
   }, []);
 
@@ -6658,7 +7101,11 @@ export default function TrustSferDashboard() {
             onToggleMobile={() => setMobileOpen(true)}
             onToggleCollapse={() => setCollapsed((v) => !v)}
             onOpenAlerts={() => setAlertsOpen(true)}
-            alertCount={CONFLICTS.filter((c) => c.severity !== "low").length}
+            alertCount={
+              CONFLICTS.filter(
+                (c) => c.severity !== "low" && !store.state.dismissedConflicts.includes(c.id)
+              ).length
+            }
           />
 
           <main
@@ -6671,7 +7118,7 @@ export default function TrustSferDashboard() {
               onOpenProject={onOpenProject}
               onNavigate={onNavigate}
               extraProjects={extraProjects}
-              addProject={addProject}
+              addProject={store.addProject}
             />
           </main>
         </div>
