@@ -319,6 +319,8 @@ function makePdf(title, lines) {
 // APP STORE — global state, persisted to localStorage
 // ════════════════════════════════════════════════════════════════════════════
 
+import { api } from "./api";
+
 const LS_KEY = "trustsfer-workspace-v1";
 
 const EMPTY_STORE = {
@@ -332,9 +334,12 @@ const EMPTY_STORE = {
   approvals: {},
   dismissedConflicts: [],
   changeOrders: {},
+  // UI-only fields (not persisted server-side):
+  _online: null, // null = not yet checked, true = API reachable, false = offline cache
+  _error: null,  // last action error, surfaced as a toast
 };
 
-function loadStore() {
+function loadCache() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return EMPTY_STORE;
@@ -349,8 +354,24 @@ function loadStore() {
   }
 }
 
+function saveCache(state) {
+  try {
+    // Strip transient UI fields from the cache payload.
+    const { _online, _error, ...persistable } = state;
+    localStorage.setItem(LS_KEY, JSON.stringify(persistable));
+  } catch (e) {
+    /* storage full or unavailable — app keeps working in-memory */
+  }
+}
+
 function storeReducer(state, action) {
   switch (action.type) {
+    case "HYDRATE":
+      return { ...state, ...action.payload };
+    case "SET_ONLINE":
+      return { ...state, _online: action.online };
+    case "SET_ERROR":
+      return { ...state, _error: action.error };
     case "ADD_PROJECT":
       return { ...state, projects: [action.payload, ...state.projects] };
     case "ADD_EVIDENCE":
@@ -379,7 +400,7 @@ function storeReducer(state, action) {
     case "DECIDE_CHANGE_ORDER":
       return { ...state, changeOrders: { ...state.changeOrders, [action.id]: action.status } };
     case "RESET":
-      return EMPTY_STORE;
+      return { ...EMPTY_STORE, _online: state._online };
     default:
       return state;
   }
@@ -389,49 +410,111 @@ const StoreContext = React.createContext(null);
 const useStore = () => React.useContext(StoreContext);
 
 function StoreProvider({ children }) {
-  const [state, dispatch] = useReducer(storeReducer, undefined, loadStore);
-
+  const [state, dispatch] = useReducer(storeReducer, undefined, loadCache);
+  // Track latest state without forcing the actions object to re-create.
+  const stateRef = useRef(state);
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(state));
-    } catch (e) {
-      /* storage full or unavailable — app keeps working in-memory */
-    }
+    stateRef.current = state;
   }, [state]);
 
-  const api = useMemo(() => {
-    const logAudit = (ev) =>
+  // Hydrate from the API on mount; fall back to whatever the cache loaded.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await api.getState();
+        if (cancelled) return;
+        dispatch({ type: "HYDRATE", payload: { ...snap, _online: true } });
+      } catch (e) {
+        if (cancelled) return;
+        dispatch({ type: "SET_ONLINE", online: false });
+        console.warn("[store] API unreachable, using local cache:", e.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist every change locally so the UI is responsive on reload even
+  // before the API hydration round-trip completes.
+  useEffect(() => {
+    saveCache(state);
+  }, [state]);
+
+  // When a report is generating and we're online, poll for completion.
+  useEffect(() => {
+    if (state._online !== true) return;
+    const pending = state.reports.some((r) => r.status === "generating");
+    if (!pending) return;
+    const t = setTimeout(async () => {
+      try {
+        const snap = await api.getState();
+        dispatch({ type: "HYDRATE", payload: snap });
+      } catch (e) {
+        /* leave the local optimistic state alone */
+      }
+    }, 1800);
+    return () => clearTimeout(t);
+  }, [state.reports, state._online]);
+
+  const actions = useMemo(() => {
+    // Mutation runner — applies the optimistic local change, then fires
+    // the API call if we're online. On API failure we surface an error
+    // but keep the optimistic result so the user isn't penalised when
+    // working offline.
+    const run = async (local, remote) => {
+      dispatch(local);
+      const online = stateRef.current._online;
+      if (online === false) return;
+      try {
+        await remote();
+        if (online === null) dispatch({ type: "SET_ONLINE", online: true });
+      } catch (e) {
+        dispatch({ type: "SET_ERROR", error: e.message });
+        setTimeout(() => dispatch({ type: "SET_ERROR", error: null }), 4500);
+      }
+    };
+
+    const projectsLookup = () => stateRef.current.projects;
+    const auditCtx = (pid) => {
+      const p = [...projectsLookup(), ...PROJECTS].find((x) => x.id === pid);
+      return { pid, flag: p?.flag || "🏳️", country: p?.country || "—" };
+    };
+
+    const logAuditLocal = (ev) => {
       dispatch({
         type: "ADD_AUDIT",
         payload: { id: `a${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ts: "just now", ...ev },
       });
-
-    const auditCtx = (pid) => {
-      const p = [...(state.projects || []), ...PROJECTS].find((x) => x.id === pid);
-      return { pid, flag: p?.flag || "🏳️", country: p?.country || "—" };
     };
 
     return {
       addProject(p) {
-        dispatch({ type: "ADD_PROJECT", payload: p });
-        logAudit({
+        const audit = {
           pid: p.id, flag: p.flag, country: p.country,
           actor: "Portfolio Admin · console",
           label: "MILESTONE", tone: "info",
           text: `Registered project "${p.name}" — ${fmtUSD(p.budget)} envelope, donor ${p.donor}.`,
           hash: fauxHash(`proj-${p.id}`),
-        });
+        };
+        run(
+          { type: "ADD_PROJECT", payload: p },
+          () => api.addProject(p)
+        );
+        logAuditLocal(audit);
       },
       addEvidence(d) {
-        dispatch({
-          type: "ADD_EVIDENCE",
-          payload: {
-            id: `u${Date.now()}`, kind: d.kind, actor: d.actor, pid: d.pid,
-            country: d.country, flag: d.flag, hash: d.cle, block: d.block,
-            t: "now", isNew: true,
-          },
-        });
-        logAudit({
+        const row = {
+          id: `u${Date.now()}`, kind: d.kind, actor: d.actor, pid: d.pid,
+          country: d.country, flag: d.flag, hash: d.cle, block: d.block,
+          t: "now", isNew: true,
+        };
+        run(
+          { type: "ADD_EVIDENCE", payload: row },
+          () => api.addEvidence(d)
+        );
+        logAuditLocal({
           ...auditCtx(d.pid),
           flag: d.flag, country: d.country,
           actor: `${d.actor} · field upload`,
@@ -441,8 +524,11 @@ function StoreProvider({ children }) {
         });
       },
       addContract(c) {
-        dispatch({ type: "ADD_CONTRACT", payload: c });
-        logAudit({
+        run(
+          { type: "ADD_CONTRACT", payload: c },
+          () => api.addContract(c)
+        );
+        logAuditLocal({
           ...auditCtx(c.pid),
           actor: "Procurement Lead · console",
           label: "MILESTONE", tone: "plum",
@@ -451,8 +537,11 @@ function StoreProvider({ children }) {
         });
       },
       addInvite(inv) {
-        dispatch({ type: "ADD_INVITE", payload: inv });
-        logAudit({
+        run(
+          { type: "ADD_INVITE", payload: inv },
+          () => api.addInvite(inv)
+        );
+        logAuditLocal({
           ...auditCtx(inv.project),
           actor: "Identity Admin · console",
           label: "APPROVAL", tone: "info",
@@ -461,8 +550,11 @@ function StoreProvider({ children }) {
         });
       },
       setSignature(id, status, doc, pid) {
-        dispatch({ type: "SET_SIGNATURE", id, status });
-        logAudit({
+        run(
+          { type: "SET_SIGNATURE", id, status },
+          () => api.setSignature(id, { status, doc, pid })
+        );
+        logAuditLocal({
           ...auditCtx(pid),
           actor: "You · e-signature engine",
           label: "APPROVAL", tone: status === "signed" ? "verified" : "risk",
@@ -471,8 +563,11 @@ function StoreProvider({ children }) {
         });
       },
       decideApproval(id, choice, title, pid) {
-        dispatch({ type: "DECIDE_APPROVAL", id, choice });
-        logAudit({
+        run(
+          { type: "DECIDE_APPROVAL", id, choice },
+          () => api.decideApproval(id, { choice, title, pid })
+        );
+        logAuditLocal({
           ...auditCtx(pid),
           actor: "You · approvals queue",
           label: "APPROVAL", tone: choice === "approved" ? "verified" : "risk",
@@ -481,8 +576,11 @@ function StoreProvider({ children }) {
         });
       },
       dismissConflict(id, title, pid) {
-        dispatch({ type: "DISMISS_CONFLICT", id });
-        logAudit({
+        run(
+          { type: "DISMISS_CONFLICT", id },
+          () => api.dismissConflict(id, { title, pid })
+        );
+        logAuditLocal({
           ...auditCtx(pid),
           actor: "You · conflict triage",
           label: "AMENDMENT", tone: "warn",
@@ -491,8 +589,11 @@ function StoreProvider({ children }) {
         });
       },
       decideChangeOrder(id, status, title, pid) {
-        dispatch({ type: "DECIDE_CHANGE_ORDER", id, status });
-        logAudit({
+        run(
+          { type: "DECIDE_CHANGE_ORDER", id, status },
+          () => api.decideChangeOrder(id, { status, title, pid })
+        );
+        logAuditLocal({
           ...auditCtx(pid),
           actor: "You · contract administration",
           label: "AMENDMENT", tone: status === "approved" ? "verified" : "risk",
@@ -502,24 +603,32 @@ function StoreProvider({ children }) {
       },
       generateReport(tpl, pid = "ALL") {
         const id = `RPT-${Math.floor(3000 + Math.random() * 6000)}`;
-        dispatch({
-          type: "ADD_REPORT",
-          payload: {
-            id, template: tpl.name, pid, generated: "—",
-            fmt: tpl.fmt, status: "generating", size: "—",
-          },
-        });
-        // Provider outlives view switches, so the timer always lands.
-        setTimeout(() => {
-          dispatch({
-            type: "UPDATE_REPORT", id,
-            patch: {
-              status: "ready", generated: "just now",
-              size: `${(0.4 + Math.random() * 3).toFixed(1)} MB`,
-            },
-          });
+        const row = {
+          id, template: tpl.name, pid, generated: "—",
+          fmt: tpl.fmt, status: "generating", size: "—",
+        };
+        // Offline: simulate the completion locally so the UX still works.
+        const fallback = setTimeout(() => {
+          if (stateRef.current._online === false) {
+            dispatch({
+              type: "UPDATE_REPORT", id,
+              patch: {
+                status: "ready", generated: "just now",
+                size: `${(0.4 + Math.random() * 3).toFixed(1)} MB`,
+              },
+            });
+          }
         }, 1400);
-        logAudit({
+        run(
+          { type: "ADD_REPORT", payload: row },
+          async () => {
+            const server = await api.generateReport(tpl);
+            // Replace the optimistic id with the server-issued one.
+            dispatch({ type: "UPDATE_REPORT", id, patch: { id: server.id } });
+            clearTimeout(fallback);
+          }
+        );
+        logAuditLocal({
           pid: "ALL", flag: "🌐", country: "Portfolio",
           actor: "You · reporting engine",
           label: "MILESTONE", tone: "info",
@@ -528,14 +637,22 @@ function StoreProvider({ children }) {
         });
         return id;
       },
-      logAudit,
+      logAudit(ev) {
+        logAuditLocal(ev);
+        if (stateRef.current._online !== false) {
+          api.logAudit(ev).catch(() => {});
+        }
+      },
       reset() {
         dispatch({ type: "RESET" });
+        if (stateRef.current._online !== false) {
+          api.reset().catch(() => {});
+        }
       },
     };
-  }, [state.projects]);
+  }, []);
 
-  const value = useMemo(() => ({ ...api, state }), [api, state]);
+  const value = useMemo(() => ({ ...actions, state }), [actions, state]);
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
@@ -1620,6 +1737,57 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onCloseMobile }) {
   );
 }
 
+// Topbar pill showing whether the API is reachable. Three states:
+// connected (green), offline cache (amber), connecting (neutral).
+function ConnectionPill() {
+  const store = useStore();
+  const online = store.state._online;
+  const label = online === true ? "Connected" : online === false ? "Offline" : "Connecting";
+  const tone = online === true ? T.signal : online === false ? T.amber : T.bone2;
+  return (
+    <span
+      className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-2 border"
+      style={{ borderColor: T.ink3, color: tone }}
+      title={online === false ? "API unreachable — changes saved locally." : "REST API · SQLite"}
+    >
+      <span
+        aria-hidden="true"
+        className="w-1.5 h-1.5 rounded-full"
+        style={{ background: tone }}
+      />
+      <span className="font-mono text-[10px] tracking-widest uppercase">{label}</span>
+    </span>
+  );
+}
+
+// Transient toast for the most recent action error (e.g. API rejected).
+function ErrorToast() {
+  const store = useStore();
+  if (!store.state._error) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed bottom-5 right-5 z-[60] max-w-sm px-4 py-3 border shadow-lg ts-fade-in"
+      style={{
+        background: T.ink1,
+        borderColor: tint(T.alert, 0.45),
+        color: T.bone0,
+      }}
+    >
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle size={14} style={{ color: T.alert, marginTop: 2 }} aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+            API error · change kept locally
+          </div>
+          <div className="mt-0.5 text-[13px] truncate">{store.state._error}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TopBar({
   active,
   onOpenPalette,
@@ -1717,6 +1885,8 @@ function TopBar({
               <ChevronDown size={12} style={{ color: T.bone2 }} aria-hidden="true" />
             </button>
           </div>
+
+          <ConnectionPill />
 
           <button
             type="button"
@@ -7146,6 +7316,8 @@ function DashboardShell() {
         onClose={() => setOpenProjectId(null)}
         onNavigate={onNavigate}
       />
+
+      <ErrorToast />
     </div>
   );
 }
