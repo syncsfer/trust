@@ -1,6 +1,5 @@
-// TrustSfer REST API. Mirrors the action surface of the client store so
-// the React provider can swap localStorage for HTTP without the views
-// (or modal flows) needing to change.
+// TrustSfer REST API. Mirrors the action surface of the client store
+// and serves the built front-end in production.
 
 import express from "express";
 import cors from "cors";
@@ -11,13 +10,16 @@ import {
   COLLECTIONS,
   insertRow,
   updateRow,
+  deleteRow,
   listCollection,
-  getSingleton,
-  putSingleton,
   snapshot,
   resetAll,
+  seedFromModule,
   tx,
 } from "./db.js";
+import * as seed from "./seed.js";
+import * as auth from "./auth.js";
+import { requireAuth, authenticate, issueToken, findUser, listUsers } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3001);
@@ -26,6 +28,14 @@ const DIST = path.join(__dirname, "..", "dist");
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+
+// ── seed on boot ───────────────────────────────────────────────────────────
+
+const seeded = await seedFromModule(seed, auth);
+const totalSeeded = Object.values(seeded).reduce((s, n) => s + n, 0);
+if (totalSeeded > 0) {
+  console.log("[seed]", seeded);
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -42,16 +52,14 @@ const requireFields = (body, fields) => {
   }
 };
 
-// Every state-changing endpoint also writes an audit row, so we
-// centralise the shape and id generation.
-function appendAudit(ev) {
+function appendAudit(actor, ev) {
   const row = {
     id: `a${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     ts: ev.ts || "just now",
-    pid: ev.pid,
+    pid: ev.pid || "ALL",
     flag: ev.flag || "🏳️",
     country: ev.country || "—",
-    actor: ev.actor,
+    actor: actor ? `${actor.name} · ${ev.actor || actor.role}` : ev.actor,
     label: ev.label,
     tone: ev.tone,
     text: ev.text,
@@ -61,19 +69,81 @@ function appendAudit(ev) {
   return row;
 }
 
-// ── routes ─────────────────────────────────────────────────────────────────
+function projectFor(pid) {
+  if (!pid || pid === "ALL") return null;
+  return listCollection("projects").find((p) => p.id === pid) || null;
+}
 
-app.get("/api/health", (req, res) => res.json({ ok: true, time: Date.now() }));
+function pidCtx(pid) {
+  const p = projectFor(pid);
+  return { pid, flag: p?.flag || "🏳️", country: p?.country || "—" };
+}
+
+// ── public routes ─────────────────────────────────────────────────────────
+
+app.get("/api/health", (req, res) =>
+  res.json({ ok: true, time: Date.now(), seeded: totalSeeded > 0 })
+);
+
+app.post(
+  "/api/auth/login",
+  wrap((req, res) => {
+    const { username, password } = req.body || {};
+    requireFields(req.body || {}, ["username", "password"]);
+    const user = authenticate(username, password);
+    if (!user) return res.status(401).json({ error: "Invalid username or password" });
+    const token = issueToken(user);
+    appendAudit(user, {
+      label: "APPROVAL",
+      tone: "info",
+      text: `${user.name} signed in.`,
+      hash: `0x${user.username}-login-${Date.now().toString(16)}`,
+      actor: `${user.role} · identity layer`,
+    });
+    res.json({ token, user });
+  })
+);
+
+app.post(
+  "/api/auth/logout",
+  requireAuth,
+  wrap((req, res) => {
+    appendAudit(req.user, {
+      label: "APPROVAL",
+      tone: "info",
+      text: `${req.user.name} signed out.`,
+      hash: `0x${req.user.username}-logout-${Date.now().toString(16)}`,
+      actor: `${req.user.role} · identity layer`,
+    });
+    res.json({ ok: true });
+  })
+);
+
+app.get(
+  "/api/auth/me",
+  requireAuth,
+  wrap((req, res) => res.json(req.user))
+);
+
+app.get(
+  "/api/auth/users",
+  requireAuth,
+  wrap((req, res) => res.json(listUsers()))
+);
+
+// ── protected: state read ──────────────────────────────────────────────────
 
 app.get(
   "/api/state",
+  requireAuth,
   wrap((req, res) => {
-    res.json(snapshot());
+    res.json({ ...snapshot(), me: req.user, users: listUsers() });
   })
 );
 
 app.get(
   "/api/collections/:name",
+  requireAuth,
   wrap((req, res) => {
     if (!COLLECTIONS.includes(req.params.name)) {
       return res.status(404).json({ error: "Unknown collection" });
@@ -82,22 +152,25 @@ app.get(
   })
 );
 
+// ── protected: mutations ──────────────────────────────────────────────────
+
 app.post(
   "/api/projects",
+  requireAuth,
   wrap((req, res) => {
     const project = req.body;
     requireFields(project, ["id", "name", "country"]);
     tx(() => {
       insertRow("projects", project);
-      appendAudit({
-        pid: project.id,
+      appendAudit(req.user, {
+        ...pidCtx(project.id),
         flag: project.flag,
         country: project.country,
         actor: "Portfolio Admin · console",
         label: "MILESTONE",
         tone: "info",
         text: `Registered project "${project.name}" — envelope ${project.budget}, donor ${project.donor}.`,
-        hash: req.body._hash || `0x${project.id}-reg`,
+        hash: `0x${project.id}-reg`,
       });
     });
     res.status(201).json(project);
@@ -106,28 +179,29 @@ app.post(
 
 app.post(
   "/api/evidence",
+  requireAuth,
   wrap((req, res) => {
     const d = req.body;
     requireFields(d, ["pid", "kind", "cle"]);
     const row = {
       id: `u${Date.now()}-${Math.random().toString(36).slice(2, 4)}`,
       kind: d.kind,
-      actor: d.actor,
+      actor: d.actor || req.user.role,
       pid: d.pid,
       country: d.country,
       flag: d.flag,
       hash: d.cle,
       block: d.block,
-      t: "now",
+      t: "just now",
       isNew: true,
     };
     tx(() => {
       insertRow("evidence", row);
-      appendAudit({
-        pid: d.pid,
+      appendAudit(req.user, {
+        ...pidCtx(d.pid),
         flag: d.flag,
         country: d.country,
-        actor: `${d.actor} · field upload`,
+        actor: `${d.actor || req.user.role} · field upload`,
         label: d.kind,
         tone: d.kind === "EVIDENCE" ? "verified" : d.kind === "PAYMENT" ? "plum" : "info",
         text: `Anchored ${d.files?.length || 0} evidence file(s) for ${d.milestone} — CLE created and Merkle-batched.`,
@@ -140,13 +214,14 @@ app.post(
 
 app.post(
   "/api/contracts",
+  requireAuth,
   wrap((req, res) => {
     const c = req.body;
     requireFields(c, ["id", "pid", "title"]);
     tx(() => {
       insertRow("contracts", c);
-      appendAudit({
-        pid: c.pid,
+      appendAudit(req.user, {
+        ...pidCtx(c.pid),
         actor: "Procurement Lead · console",
         label: "MILESTONE",
         tone: "plum",
@@ -160,13 +235,14 @@ app.post(
 
 app.post(
   "/api/invites",
+  requireAuth,
   wrap((req, res) => {
     const inv = req.body;
     requireFields(inv, ["id", "type", "org", "project"]);
     tx(() => {
       insertRow("invites", inv);
-      appendAudit({
-        pid: inv.project,
+      appendAudit(req.user, {
+        ...pidCtx(inv.project),
         actor: "Identity Admin · console",
         label: "APPROVAL",
         tone: "info",
@@ -178,11 +254,9 @@ app.post(
   })
 );
 
-// Generating a report kicks off a server-side simulated build; the
-// client gets the row back immediately with status=generating and can
-// poll /api/state (or just the reports collection) for completion.
 app.post(
   "/api/reports/generate",
+  requireAuth,
   wrap((req, res) => {
     const { template, fmt, pid = "ALL" } = req.body;
     requireFields(req.body, ["template", "fmt"]);
@@ -197,7 +271,7 @@ app.post(
     };
     tx(() => {
       insertRow("reports", row);
-      appendAudit({
+      appendAudit(req.user, {
         pid: "ALL",
         flag: "🌐",
         country: "Portfolio",
@@ -225,6 +299,7 @@ app.post(
 
 app.patch(
   "/api/reports/:id",
+  requireAuth,
   wrap((req, res) => {
     const updated = updateRow("reports", req.params.id, req.body);
     if (!updated) return res.status(404).json({ error: "Not found" });
@@ -232,102 +307,139 @@ app.patch(
   })
 );
 
-app.put(
+app.patch(
   "/api/signatures/:id",
+  requireAuth,
   wrap((req, res) => {
-    const { status, doc, pid } = req.body;
+    const { status } = req.body;
     requireFields(req.body, ["status"]);
-    const next = { ...getSingleton("sigOverrides"), [req.params.id]: status };
+    const updated = updateRow("signatures", req.params.id, {
+      status,
+      when: "just now",
+      actor: req.user.name,
+    });
+    if (!updated) return res.status(404).json({ error: "Not found" });
     tx(() => {
-      putSingleton("sigOverrides", next);
-      appendAudit({
-        pid,
+      appendAudit(req.user, {
+        ...pidCtx(updated.pid),
         actor: "You · e-signature engine",
         label: "APPROVAL",
         tone: status === "signed" ? "verified" : "risk",
-        text: `${status === "signed" ? "Signed" : "Declined"} "${doc}" — provenance hash anchored.`,
+        text: `${status === "signed" ? "Signed" : "Declined"} "${updated.doc}" — provenance hash anchored.`,
         hash: `0x${req.params.id}-${status}`,
       });
     });
-    res.json({ id: req.params.id, status });
+    res.json(updated);
   })
 );
 
-app.put(
+app.patch(
   "/api/approvals/:id",
+  requireAuth,
   wrap((req, res) => {
-    const { choice, title, pid } = req.body;
-    requireFields(req.body, ["choice"]);
-    const next = { ...getSingleton("approvals"), [req.params.id]: choice };
+    const { decision } = req.body;
+    requireFields(req.body, ["decision"]);
+    const updated = updateRow("approvals", req.params.id, { decision });
+    if (!updated) return res.status(404).json({ error: "Not found" });
     tx(() => {
-      putSingleton("approvals", next);
-      appendAudit({
-        pid,
+      appendAudit(req.user, {
+        ...pidCtx(updated.pid),
         actor: "You · approvals queue",
         label: "APPROVAL",
-        tone: choice === "approved" ? "verified" : "risk",
-        text: `${choice === "approved" ? "Approved" : "Returned"} "${title}" (${req.params.id}).`,
-        hash: `0x${req.params.id}-${choice}`,
+        tone: decision === "approved" ? "verified" : "risk",
+        text: `${decision === "approved" ? "Approved" : "Returned"} "${updated.title}" (${req.params.id}).`,
+        hash: `0x${req.params.id}-${decision}`,
       });
     });
-    res.json({ id: req.params.id, choice });
+    res.json(updated);
   })
 );
 
-app.put(
+app.patch(
   "/api/change-orders/:id",
+  requireAuth,
   wrap((req, res) => {
-    const { status, title, pid } = req.body;
+    const { status } = req.body;
     requireFields(req.body, ["status"]);
-    const next = { ...getSingleton("changeOrders"), [req.params.id]: status };
+    const updated = updateRow("changeOrders", req.params.id, { status });
+    if (!updated) return res.status(404).json({ error: "Not found" });
     tx(() => {
-      putSingleton("changeOrders", next);
-      appendAudit({
-        pid,
+      appendAudit(req.user, {
+        ...pidCtx(updated.pid),
         actor: "You · contract administration",
         label: "AMENDMENT",
         tone: status === "approved" ? "verified" : "risk",
-        text: `Change order ${req.params.id} ${status} — "${title}".`,
+        text: `Change order ${req.params.id} ${status} — "${updated.title}".`,
         hash: `0x${req.params.id}-${status}`,
       });
     });
-    res.json({ id: req.params.id, status });
+    res.json(updated);
   })
 );
 
-app.post(
-  "/api/conflicts/:id/dismiss",
+app.patch(
+  "/api/conflicts/:id",
+  requireAuth,
   wrap((req, res) => {
-    const { title, pid } = req.body;
-    const current = getSingleton("dismissedConflicts");
-    const next = current.includes(req.params.id) ? current : [...current, req.params.id];
-    tx(() => {
-      putSingleton("dismissedConflicts", next);
-      appendAudit({
-        pid,
-        actor: "You · conflict triage",
-        label: "AMENDMENT",
-        tone: "warn",
-        text: `Dismissed conflict ${req.params.id} — "${title}" marked reviewed, no action.`,
-        hash: `0x${req.params.id}-dismiss`,
-      });
+    const { dismissed } = req.body;
+    const updated = updateRow("conflicts", req.params.id, {
+      dismissed: !!dismissed,
     });
-    res.json({ id: req.params.id, dismissed: true });
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (dismissed) {
+      tx(() => {
+        appendAudit(req.user, {
+          ...pidCtx(updated.pid),
+          actor: "You · conflict triage",
+          label: "AMENDMENT",
+          tone: "warn",
+          text: `Dismissed conflict ${req.params.id} — "${updated.title}" marked reviewed, no action.`,
+          hash: `0x${req.params.id}-dismiss`,
+        });
+      });
+    }
+    res.json(updated);
+  })
+);
+
+app.patch(
+  "/api/workflows/:id",
+  requireAuth,
+  wrap((req, res) => {
+    const updated = updateRow("workflows", req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (req.body.stage !== undefined) {
+      tx(() => {
+        appendAudit(req.user, {
+          ...pidCtx(updated.pid),
+          actor: "You · workflow engine",
+          label: "MILESTONE",
+          tone: updated.blocked ? "risk" : "info",
+          text: `Advanced workflow "${updated.title}" to stage ${updated.stage}.`,
+          hash: `0x${req.params.id}-step`,
+        });
+      });
+    }
+    res.json(updated);
   })
 );
 
 app.post(
   "/api/audit",
+  requireAuth,
   wrap((req, res) => {
-    const row = appendAudit(req.body);
+    const row = appendAudit(req.user, req.body);
     res.status(201).json(row);
   })
 );
 
 app.post(
   "/api/reset",
-  wrap((req, res) => {
+  requireAuth,
+  wrap(async (req, res) => {
     resetAll();
+    // Re-seed immediately so the workspace returns to a usable baseline.
+    await seedFromModule(seed, auth);
     res.json({ ok: true });
   })
 );

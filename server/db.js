@@ -1,8 +1,6 @@
-// SQLite persistence layer. Each app collection (projects, evidence, …)
-// is stored row-per-record in a generic `kv` table; the small per-id maps
-// (signature overrides, approval decisions, etc.) live as JSON blobs in
-// `singletons`. This keeps the schema trivial while preserving atomic
-// row-level inserts where they matter.
+// SQLite persistence layer. Each app collection is stored row-per-record
+// in a generic `kv` table; `singletons` exists for genuinely scalar app
+// state (currently just the JWT signing secret).
 
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
@@ -43,6 +41,8 @@ const stmts = {
   selectCollection: db.prepare(
     "SELECT id, data, created_at FROM kv WHERE collection = ? ORDER BY created_at DESC"
   ),
+  countCollection: db.prepare("SELECT COUNT(*) AS n FROM kv WHERE collection = ?"),
+  deleteRow: db.prepare("DELETE FROM kv WHERE collection = ? AND id = ?"),
   truncateCollection: db.prepare("DELETE FROM kv WHERE collection = ?"),
   getSingleton: db.prepare("SELECT data FROM singletons WHERE key = ?"),
   putSingleton: db.prepare(
@@ -50,31 +50,24 @@ const stmts = {
       "ON CONFLICT(key) DO UPDATE SET data = excluded.data"
   ),
   delAllKv: db.prepare("DELETE FROM kv"),
-  delAllSingletons: db.prepare("DELETE FROM singletons"),
 };
 
+// Collections in priority/insertion order. Row order in /api/state
+// reflects this list so the client receives stable ordering.
 export const COLLECTIONS = [
   "projects",
+  "contracts",
   "evidence",
   "auditEvents",
-  "contracts",
+  "conflicts",
+  "approvals",
+  "signatures",
+  "changeOrders",
+  "workflows",
+  "ledger",
   "invites",
   "reports",
 ];
-
-export const SINGLETONS = [
-  "sigOverrides",
-  "approvals",
-  "dismissedConflicts",
-  "changeOrders",
-];
-
-const SINGLETON_DEFAULTS = {
-  sigOverrides: {},
-  approvals: {},
-  dismissedConflicts: [],
-  changeOrders: {},
-};
 
 export function insertRow(collection, row) {
   if (!row.id) throw new Error("row.id required");
@@ -90,13 +83,21 @@ export function updateRow(collection, id, patch) {
   return merged;
 }
 
+export function deleteRow(collection, id) {
+  return stmts.deleteRow.run(collection, id).changes > 0;
+}
+
 export function listCollection(collection) {
   return stmts.selectCollection.all(collection).map((r) => JSON.parse(r.data));
 }
 
+export function countCollection(collection) {
+  return stmts.countCollection.get(collection).n;
+}
+
 export function getSingleton(key) {
   const row = stmts.getSingleton.get(key);
-  return row ? JSON.parse(row.data) : SINGLETON_DEFAULTS[key];
+  return row ? JSON.parse(row.data) : null;
 }
 
 export function putSingleton(key, value) {
@@ -104,23 +105,62 @@ export function putSingleton(key, value) {
   return value;
 }
 
-// Read the whole workspace in one round-trip. Cheap at this scale and
-// keeps the client provider's hydration logic identical to the prior
-// localStorage path.
 export function snapshot() {
   const out = {};
   for (const c of COLLECTIONS) out[c] = listCollection(c);
-  for (const s of SINGLETONS) out[s] = getSingleton(s);
   return out;
 }
 
+// Re-seedable reset. Clears the kv data but preserves auth state in
+// singletons (notably the JWT secret) so existing tokens stay valid.
 export const resetAll = db.transaction(() => {
   stmts.delAllKv.run();
-  stmts.delAllSingletons.run();
 });
 
-// Many actions both insert a row in one collection and append an audit
-// event. Caller passes a function that runs synchronously inside a tx.
 export function tx(fn) {
   return db.transaction(fn)();
+}
+
+// ── seeding ───────────────────────────────────────────────────────────────
+
+// Seed rows are inserted with a synthetic created_at so the ORDER BY
+// preserves the source array order in the seed module.
+function seedRows(collection, rows) {
+  if (countCollection(collection) > 0) return 0;
+  const insert = db.prepare(
+    "INSERT INTO kv (collection, id, data, created_at) VALUES (?, ?, ?, ?)"
+  );
+  const tx = db.transaction((items) => {
+    const base = Date.now();
+    items.forEach((row, i) => {
+      // Reverse index so the first item ends up most recent.
+      insert.run(collection, row.id, JSON.stringify(row), base + (items.length - i));
+    });
+  });
+  tx(rows);
+  return rows.length;
+}
+
+export async function seedFromModule(seedModule, authModule) {
+  const tally = {};
+  tally.projects = seedRows("projects", seedModule.SEED_PROJECTS);
+  tally.contracts = seedRows("contracts", seedModule.SEED_CONTRACTS);
+  tally.conflicts = seedRows(
+    "conflicts",
+    seedModule.SEED_CONFLICTS.map((c) => ({ ...c, dismissed: false }))
+  );
+  tally.approvals = seedRows(
+    "approvals",
+    seedModule.SEED_APPROVALS.map((a) => ({ ...a, decision: null }))
+  );
+  tally.signatures = seedRows("signatures", seedModule.SEED_SIGNATURES);
+  tally.changeOrders = seedRows("changeOrders", seedModule.SEED_CHANGE_ORDERS);
+  tally.workflows = seedRows("workflows", seedModule.SEED_WORKFLOWS);
+  tally.ledger = seedRows("ledger", seedModule.SEED_LEDGER);
+  tally.reports = seedRows("reports", seedModule.SEED_REPORTS);
+
+  for (const u of seedModule.SEED_USERS) authModule.ensureUserSeeded(u);
+  tally.users = seedModule.SEED_USERS.length;
+
+  return tally;
 }

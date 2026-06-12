@@ -319,59 +319,38 @@ function makePdf(title, lines) {
 // APP STORE — global state, persisted to localStorage
 // ════════════════════════════════════════════════════════════════════════════
 
-import { api } from "./api";
+import { api, getToken, setToken, onAuthChange } from "./api";
 
-const LS_KEY = "trustsfer-workspace-v1";
-
-const EMPTY_STORE = {
+const EMPTY_STATE = {
+  me: null,
+  users: [],
   projects: [],
+  contracts: [],
   evidence: [],
   auditEvents: [],
-  contracts: [],
+  conflicts: [],
+  approvals: [],
+  signatures: [],
+  changeOrders: [],
+  workflows: [],
+  ledger: [],
   invites: [],
   reports: [],
-  sigOverrides: {},
-  approvals: {},
-  dismissedConflicts: [],
-  changeOrders: {},
-  // UI-only fields (not persisted server-side):
-  _online: null, // null = not yet checked, true = API reachable, false = offline cache
-  _error: null,  // last action error, surfaced as a toast
+  _online: null,
+  _error: null,
+  _hydrated: false,
 };
-
-function loadCache() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return EMPTY_STORE;
-    const parsed = { ...EMPTY_STORE, ...JSON.parse(raw) };
-    // A report stuck mid-generation across a reload resolves to ready.
-    parsed.reports = parsed.reports.map((r) =>
-      r.status === "generating" ? { ...r, status: "ready" } : r
-    );
-    return parsed;
-  } catch (e) {
-    return EMPTY_STORE;
-  }
-}
-
-function saveCache(state) {
-  try {
-    // Strip transient UI fields from the cache payload.
-    const { _online, _error, ...persistable } = state;
-    localStorage.setItem(LS_KEY, JSON.stringify(persistable));
-  } catch (e) {
-    /* storage full or unavailable — app keeps working in-memory */
-  }
-}
 
 function storeReducer(state, action) {
   switch (action.type) {
     case "HYDRATE":
-      return { ...state, ...action.payload };
+      return { ...state, ...action.payload, _hydrated: true };
     case "SET_ONLINE":
       return { ...state, _online: action.online };
     case "SET_ERROR":
       return { ...state, _error: action.error };
+    case "SET_ME":
+      return { ...state, me: action.me };
     case "ADD_PROJECT":
       return { ...state, projects: [action.payload, ...state.projects] };
     case "ADD_EVIDENCE":
@@ -384,23 +363,17 @@ function storeReducer(state, action) {
       return { ...state, invites: [action.payload, ...state.invites] };
     case "ADD_REPORT":
       return { ...state, reports: [action.payload, ...state.reports] };
-    case "UPDATE_REPORT":
+    case "PATCH_ROW": {
+      const list = state[action.collection];
       return {
         ...state,
-        reports: state.reports.map((r) => (r.id === action.id ? { ...r, ...action.patch } : r)),
+        [action.collection]: list.map((r) =>
+          r.id === action.id ? { ...r, ...action.patch } : r
+        ),
       };
-    case "SET_SIGNATURE":
-      return { ...state, sigOverrides: { ...state.sigOverrides, [action.id]: action.status } };
-    case "DECIDE_APPROVAL":
-      return { ...state, approvals: { ...state.approvals, [action.id]: action.choice } };
-    case "DISMISS_CONFLICT":
-      return state.dismissedConflicts.includes(action.id)
-        ? state
-        : { ...state, dismissedConflicts: [...state.dismissedConflicts, action.id] };
-    case "DECIDE_CHANGE_ORDER":
-      return { ...state, changeOrders: { ...state.changeOrders, [action.id]: action.status } };
+    }
     case "RESET":
-      return { ...EMPTY_STORE, _online: state._online };
+      return { ...EMPTY_STATE, me: state.me, _online: state._online, _hydrated: false };
     default:
       return state;
   }
@@ -410,15 +383,23 @@ const StoreContext = React.createContext(null);
 const useStore = () => React.useContext(StoreContext);
 
 function StoreProvider({ children }) {
-  const [state, dispatch] = useReducer(storeReducer, undefined, loadCache);
-  // Track latest state without forcing the actions object to re-create.
+  const [state, dispatch] = useReducer(storeReducer, EMPTY_STATE);
+  const [authToken, setAuthToken] = useState(() => getToken());
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  // Hydrate from the API on mount; fall back to whatever the cache loaded.
+  // Track token changes (login, logout, 401 auto-clear).
+  useEffect(() => onAuthChange(() => setAuthToken(getToken())), []);
+
+  // Hydrate whenever the token changes.
   useEffect(() => {
+    if (!authToken) {
+      dispatch({ type: "RESET" });
+      dispatch({ type: "SET_ONLINE", online: true });
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -427,232 +408,151 @@ function StoreProvider({ children }) {
         dispatch({ type: "HYDRATE", payload: { ...snap, _online: true } });
       } catch (e) {
         if (cancelled) return;
+        if (e.status === 401) {
+          setToken(null);
+          return;
+        }
         dispatch({ type: "SET_ONLINE", online: false });
-        console.warn("[store] API unreachable, using local cache:", e.message);
+        dispatch({ type: "SET_ERROR", error: `Hydration failed: ${e.message}` });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authToken]);
 
-  // Persist every change locally so the UI is responsive on reload even
-  // before the API hydration round-trip completes.
+  // Poll for report completion while any report is generating.
   useEffect(() => {
-    saveCache(state);
-  }, [state]);
-
-  // When a report is generating and we're online, poll for completion.
-  useEffect(() => {
-    if (state._online !== true) return;
-    const pending = state.reports.some((r) => r.status === "generating");
-    if (!pending) return;
+    if (state._online !== true || !state._hydrated) return;
+    if (!state.reports.some((r) => r.status === "generating")) return;
     const t = setTimeout(async () => {
       try {
         const snap = await api.getState();
         dispatch({ type: "HYDRATE", payload: snap });
       } catch (e) {
-        /* leave the local optimistic state alone */
+        /* leave optimistic state alone */
       }
     }, 1800);
     return () => clearTimeout(t);
-  }, [state.reports, state._online]);
+  }, [state.reports, state._online, state._hydrated]);
 
   const actions = useMemo(() => {
-    // Mutation runner — applies the optimistic local change, then fires
-    // the API call if we're online. On API failure we surface an error
-    // but keep the optimistic result so the user isn't penalised when
-    // working offline.
     const run = async (local, remote) => {
       dispatch(local);
-      const online = stateRef.current._online;
-      if (online === false) return;
       try {
         await remote();
-        if (online === null) dispatch({ type: "SET_ONLINE", online: true });
+        // Pull the freshly-written audit row(s) without blocking the
+        // optimistic update the user already sees.
+        api.getState().then(
+          (snap) => dispatch({ type: "HYDRATE", payload: snap }),
+          () => {}
+        );
       } catch (e) {
+        if (e.status === 401) return;
         dispatch({ type: "SET_ERROR", error: e.message });
         setTimeout(() => dispatch({ type: "SET_ERROR", error: null }), 4500);
       }
     };
 
-    const projectsLookup = () => stateRef.current.projects;
-    const auditCtx = (pid) => {
-      const p = [...projectsLookup(), ...PROJECTS].find((x) => x.id === pid);
-      return { pid, flag: p?.flag || "🏳️", country: p?.country || "—" };
-    };
-
-    const logAuditLocal = (ev) => {
-      dispatch({
-        type: "ADD_AUDIT",
-        payload: { id: `a${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ts: "just now", ...ev },
-      });
-    };
-
     return {
+      async login(username, password) {
+        const { token, user } = await api.login(username, password);
+        setToken(token);
+        dispatch({ type: "SET_ME", me: user });
+        return user;
+      },
+      async logout() {
+        try {
+          await api.logout();
+        } catch (e) {
+          /* ignore */
+        }
+        setToken(null);
+      },
       addProject(p) {
-        const audit = {
-          pid: p.id, flag: p.flag, country: p.country,
-          actor: "Portfolio Admin · console",
-          label: "MILESTONE", tone: "info",
-          text: `Registered project "${p.name}" — ${fmtUSD(p.budget)} envelope, donor ${p.donor}.`,
-          hash: fauxHash(`proj-${p.id}`),
-        };
-        run(
-          { type: "ADD_PROJECT", payload: p },
-          () => api.addProject(p)
-        );
-        logAuditLocal(audit);
+        run({ type: "ADD_PROJECT", payload: p }, () => api.addProject(p));
       },
       addEvidence(d) {
-        const row = {
+        const optimistic = {
           id: `u${Date.now()}`, kind: d.kind, actor: d.actor, pid: d.pid,
           country: d.country, flag: d.flag, hash: d.cle, block: d.block,
-          t: "now", isNew: true,
+          t: "just now", isNew: true,
         };
-        run(
-          { type: "ADD_EVIDENCE", payload: row },
-          () => api.addEvidence(d)
-        );
-        logAuditLocal({
-          ...auditCtx(d.pid),
-          flag: d.flag, country: d.country,
-          actor: `${d.actor} · field upload`,
-          label: d.kind, tone: d.kind === "EVIDENCE" ? "verified" : d.kind === "PAYMENT" ? "plum" : "info",
-          text: `Anchored ${d.files.length} evidence file${d.files.length === 1 ? "" : "s"} for ${d.milestone} — CLE created and Merkle-batched.`,
-          hash: d.cle,
-        });
+        run({ type: "ADD_EVIDENCE", payload: optimistic }, () => api.addEvidence(d));
       },
       addContract(c) {
-        run(
-          { type: "ADD_CONTRACT", payload: c },
-          () => api.addContract(c)
-        );
-        logAuditLocal({
-          ...auditCtx(c.pid),
-          actor: "Procurement Lead · console",
-          label: "MILESTONE", tone: "plum",
-          text: `Awarded contract "${c.title}" to ${c.contractor} — ${fmtUSD(c.value)} via ${c.method}.`,
-          hash: fauxHash(`ct-${c.id}`),
-        });
+        run({ type: "ADD_CONTRACT", payload: c }, () => api.addContract(c));
       },
       addInvite(inv) {
-        run(
-          { type: "ADD_INVITE", payload: inv },
-          () => api.addInvite(inv)
-        );
-        logAuditLocal({
-          ...auditCtx(inv.project),
-          actor: "Identity Admin · console",
-          label: "APPROVAL", tone: "info",
-          text: `Invited ${inv.org} (${inv.type}) as ${inv.role} · ${inv.tier} on ${inv.project}.`,
-          hash: fauxHash(`inv-${inv.id}`),
-        });
+        run({ type: "ADD_INVITE", payload: inv }, () => api.addInvite(inv));
       },
-      setSignature(id, status, doc, pid) {
+      setSignature(id, status) {
         run(
-          { type: "SET_SIGNATURE", id, status },
-          () => api.setSignature(id, { status, doc, pid })
+          { type: "PATCH_ROW", collection: "signatures", id, patch: { status, when: "just now" } },
+          () => api.setSignature(id, status)
         );
-        logAuditLocal({
-          ...auditCtx(pid),
-          actor: "You · e-signature engine",
-          label: "APPROVAL", tone: status === "signed" ? "verified" : "risk",
-          text: `${status === "signed" ? "Signed" : "Declined"} "${doc}" — provenance hash anchored.`,
-          hash: fauxHash(`sig-${id}-${status}`),
-        });
       },
-      decideApproval(id, choice, title, pid) {
+      decideApproval(id, decision) {
         run(
-          { type: "DECIDE_APPROVAL", id, choice },
-          () => api.decideApproval(id, { choice, title, pid })
+          { type: "PATCH_ROW", collection: "approvals", id, patch: { decision } },
+          () => api.decideApproval(id, decision)
         );
-        logAuditLocal({
-          ...auditCtx(pid),
-          actor: "You · approvals queue",
-          label: "APPROVAL", tone: choice === "approved" ? "verified" : "risk",
-          text: `${choice === "approved" ? "Approved" : "Returned"} "${title}" (${id}).`,
-          hash: fauxHash(`decision-${id}-${choice}`),
-        });
       },
-      dismissConflict(id, title, pid) {
+      dismissConflict(id) {
         run(
-          { type: "DISMISS_CONFLICT", id },
-          () => api.dismissConflict(id, { title, pid })
+          { type: "PATCH_ROW", collection: "conflicts", id, patch: { dismissed: true } },
+          () => api.dismissConflict(id)
         );
-        logAuditLocal({
-          ...auditCtx(pid),
-          actor: "You · conflict triage",
-          label: "AMENDMENT", tone: "warn",
-          text: `Dismissed conflict ${id} — "${title}" marked reviewed, no action.`,
-          hash: fauxHash(`dismiss-${id}`),
-        });
       },
-      decideChangeOrder(id, status, title, pid) {
+      decideChangeOrder(id, status) {
         run(
-          { type: "DECIDE_CHANGE_ORDER", id, status },
-          () => api.decideChangeOrder(id, { status, title, pid })
+          { type: "PATCH_ROW", collection: "changeOrders", id, patch: { status } },
+          () => api.decideChangeOrder(id, status)
         );
-        logAuditLocal({
-          ...auditCtx(pid),
-          actor: "You · contract administration",
-          label: "AMENDMENT", tone: status === "approved" ? "verified" : "risk",
-          text: `Change order ${id} ${status} — "${title}".`,
-          hash: fauxHash(`co-${id}-${status}`),
-        });
+      },
+      advanceWorkflow(id, patch) {
+        run(
+          { type: "PATCH_ROW", collection: "workflows", id, patch },
+          () => api.advanceWorkflow(id, patch)
+        );
       },
       generateReport(tpl, pid = "ALL") {
-        const id = `RPT-${Math.floor(3000 + Math.random() * 6000)}`;
+        const id = `RPT-tmp-${Math.floor(Math.random() * 90000)}`;
         const row = {
           id, template: tpl.name, pid, generated: "—",
           fmt: tpl.fmt, status: "generating", size: "—",
         };
-        // Offline: simulate the completion locally so the UX still works.
-        const fallback = setTimeout(() => {
-          if (stateRef.current._online === false) {
-            dispatch({
-              type: "UPDATE_REPORT", id,
-              patch: {
-                status: "ready", generated: "just now",
-                size: `${(0.4 + Math.random() * 3).toFixed(1)} MB`,
-              },
-            });
-          }
-        }, 1400);
         run(
           { type: "ADD_REPORT", payload: row },
           async () => {
             const server = await api.generateReport(tpl);
-            // Replace the optimistic id with the server-issued one.
-            dispatch({ type: "UPDATE_REPORT", id, patch: { id: server.id } });
-            clearTimeout(fallback);
+            dispatch({
+              type: "PATCH_ROW",
+              collection: "reports",
+              id,
+              patch: { id: server.id },
+            });
           }
         );
-        logAuditLocal({
-          pid: "ALL", flag: "🌐", country: "Portfolio",
-          actor: "You · reporting engine",
-          label: "MILESTONE", tone: "info",
-          text: `Generated "${tpl.name}" (${tpl.fmt}).`,
-          hash: fauxHash(`rpt-${id}`),
-        });
         return id;
       },
-      logAudit(ev) {
-        logAuditLocal(ev);
-        if (stateRef.current._online !== false) {
-          api.logAudit(ev).catch(() => {});
-        }
-      },
-      reset() {
+      async reset() {
         dispatch({ type: "RESET" });
-        if (stateRef.current._online !== false) {
-          api.reset().catch(() => {});
+        try {
+          await api.reset();
+          const snap = await api.getState();
+          dispatch({ type: "HYDRATE", payload: snap });
+        } catch (e) {
+          dispatch({ type: "SET_ERROR", error: e.message });
         }
       },
     };
   }, []);
 
-  const value = useMemo(() => ({ ...actions, state }), [actions, state]);
+  const value = useMemo(
+    () => ({ ...actions, state, authToken }),
+    [actions, state, authToken]
+  );
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
@@ -693,435 +593,25 @@ function buildReportFile(report, allProjects) {
 // MOCK DATA
 // ════════════════════════════════════════════════════════════════════════════
 
-const PROJECTS = [
-  {
-    id: "RD-N4-EXP",
-    name: "Northern Corridor Expressway",
-    country: "Dominican Republic",
-    flag: "🇩🇴",
-    sector: "Roads",
-    donor: "IDB",
-    ministry: "Ministry of Public Works",
-    budget: 412_000_000,
-    spent: 268_400_000,
-    i3: 84.2,
-    risk: "low",
-    progress: 64,
-    started: "2024-03-12",
-    eta: "2026-11-30",
-    lastEvent: "2m ago",
-    alerts: 0,
-  },
-  {
-    id: "KE-PRT-MS3",
-    name: "Mombasa Port Terminal 3",
-    country: "Kenya",
-    flag: "🇰🇪",
-    sector: "Ports",
-    donor: "World Bank",
-    ministry: "Kenya Ports Authority",
-    budget: 890_000_000,
-    spent: 522_300_000,
-    i3: 71.6,
-    risk: "med",
-    progress: 58,
-    started: "2023-09-04",
-    eta: "2027-02-28",
-    lastEvent: "12m ago",
-    alerts: 2,
-  },
-  {
-    id: "PH-HSP-GMA",
-    name: "Greater Manila Regional Hospital",
-    country: "Philippines",
-    flag: "🇵🇭",
-    sector: "Health",
-    donor: "ADB",
-    ministry: "Department of Health",
-    budget: 215_000_000,
-    spent: 198_700_000,
-    i3: 58.9,
-    risk: "high",
-    progress: 81,
-    started: "2023-01-15",
-    eta: "2025-09-30",
-    lastEvent: "27s ago",
-    alerts: 4,
-  },
-  {
-    id: "CO-EN-LLR",
-    name: "Llanos Solar Generation Cluster",
-    country: "Colombia",
-    flag: "🇨🇴",
-    sector: "Energy",
-    donor: "Treasury",
-    ministry: "Ministry of Energy",
-    budget: 340_000_000,
-    spent: 91_500_000,
-    i3: 92.4,
-    risk: "low",
-    progress: 22,
-    started: "2025-02-01",
-    eta: "2027-12-15",
-    lastEvent: "1h ago",
-    alerts: 0,
-  },
-  {
-    id: "NG-WT-LGS",
-    name: "Lagos Metropolitan Water Reuse",
-    country: "Nigeria",
-    flag: "🇳🇬",
-    sector: "Water",
-    donor: "AfDB",
-    ministry: "Ministry of Water Resources",
-    budget: 540_000_000,
-    spent: 312_600_000,
-    i3: 67.3,
-    risk: "med",
-    progress: 49,
-    started: "2024-05-20",
-    eta: "2027-06-30",
-    lastEvent: "4m ago",
-    alerts: 1,
-  },
-  {
-    id: "JO-RD-DSR",
-    name: "Desert Highway Resurfacing Programme",
-    country: "Jordan",
-    flag: "🇯🇴",
-    sector: "Roads",
-    donor: "EU",
-    ministry: "Ministry of Public Works & Housing",
-    budget: 124_000_000,
-    spent: 119_300_000,
-    i3: 88.1,
-    risk: "low",
-    progress: 96,
-    started: "2023-06-01",
-    eta: "2025-08-30",
-    lastEvent: "18m ago",
-    alerts: 0,
-  },
-  {
-    id: "ID-EN-JKT",
-    name: "West Java Transmission Upgrade",
-    country: "Indonesia",
-    flag: "🇮🇩",
-    sector: "Energy",
-    donor: "World Bank",
-    ministry: "Ministry of Energy & Mineral Resources",
-    budget: 760_000_000,
-    spent: 408_500_000,
-    i3: 75.8,
-    risk: "med",
-    progress: 54,
-    started: "2024-02-10",
-    eta: "2026-12-20",
-    lastEvent: "9m ago",
-    alerts: 1,
-  },
-  {
-    id: "GH-MN-ACR",
-    name: "Accra Municipal Drainage Phase II",
-    country: "Ghana",
-    flag: "🇬🇭",
-    sector: "Municipal",
-    donor: "Treasury",
-    ministry: "Ministry of Local Government",
-    budget: 78_000_000,
-    spent: 51_200_000,
-    i3: 63.2,
-    risk: "med",
-    progress: 65,
-    started: "2024-08-12",
-    eta: "2026-04-30",
-    lastEvent: "33m ago",
-    alerts: 2,
-  },
-  {
-    id: "BD-DR-CYC",
-    name: "Cyclone Reconstruction Phase III",
-    country: "Bangladesh",
-    flag: "🇧🇩",
-    sector: "Disaster",
-    donor: "USAID",
-    ministry: "Disaster Management Bureau",
-    budget: 95_000_000,
-    spent: 71_400_000,
-    i3: 49.1,
-    risk: "high",
-    progress: 74,
-    started: "2024-01-08",
-    eta: "2025-12-30",
-    lastEvent: "1m ago",
-    alerts: 5,
-  },
-  {
-    id: "MX-RD-OAX",
-    name: "Oaxaca Rural Connector Roads",
-    country: "Mexico",
-    flag: "🇲🇽",
-    sector: "Roads",
-    donor: "Treasury",
-    ministry: "SCT",
-    budget: 198_000_000,
-    spent: 86_300_000,
-    i3: 79.6,
-    risk: "low",
-    progress: 41,
-    started: "2024-11-04",
-    eta: "2027-03-30",
-    lastEvent: "22m ago",
-    alerts: 0,
-  },
-  {
-    id: "TZ-ED-DSM",
-    name: "Dar es Salaam Schools Modernization",
-    country: "Tanzania",
-    flag: "🇹🇿",
-    sector: "Education",
-    donor: "AfDB",
-    ministry: "Ministry of Education",
-    budget: 110_000_000,
-    spent: 28_900_000,
-    i3: 86.5,
-    risk: "low",
-    progress: 24,
-    started: "2025-04-18",
-    eta: "2027-08-20",
-    lastEvent: "2h ago",
-    alerts: 0,
-  },
-  {
-    id: "PE-PRT-CLO",
-    name: "Callao Port Container Yard Expansion",
-    country: "Peru",
-    flag: "🇵🇪",
-    sector: "Ports",
-    donor: "IDB",
-    ministry: "Ministry of Transport",
-    budget: 280_000_000,
-    spent: 169_400_000,
-    i3: 73.2,
-    risk: "med",
-    progress: 60,
-    started: "2024-04-15",
-    eta: "2026-10-30",
-    lastEvent: "47m ago",
-    alerts: 1,
-  },
-  {
-    id: "EG-HSP-CRO",
-    name: "Cairo Specialty Hospital Network",
-    country: "Egypt",
-    flag: "🇪🇬",
-    sector: "Health",
-    donor: "World Bank",
-    ministry: "Ministry of Health & Population",
-    budget: 420_000_000,
-    spent: 192_700_000,
-    i3: 81.0,
-    risk: "low",
-    progress: 46,
-    started: "2024-07-22",
-    eta: "2027-05-15",
-    lastEvent: "14m ago",
-    alerts: 0,
-  },
-  {
-    id: "VN-EN-MEK",
-    name: "Mekong Delta Power Network",
-    country: "Vietnam",
-    flag: "🇻🇳",
-    sector: "Energy",
-    donor: "ADB",
-    ministry: "MOIT",
-    budget: 510_000_000,
-    spent: 244_000_000,
-    i3: 77.4,
-    risk: "med",
-    progress: 48,
-    started: "2024-06-09",
-    eta: "2026-11-30",
-    lastEvent: "5m ago",
-    alerts: 1,
-  },
-];
-
-const SECTORS = [...new Set(PROJECTS.map((p) => p.sector))].sort();
-const DONORS = [...new Set(PROJECTS.map((p) => p.donor))].sort();
+// All bulk seed data lives on the server now (server/seed.js) and the
+// client hydrates it via /api/state. These remain as empty fallbacks so
+// any code path that briefly runs before hydration is safe to render.
+const PROJECTS = [];
+const CONFLICTS = [];
+const APPROVALS = [];
 const RISKS = ["low", "med", "high"];
 
-const CONFLICTS = [
-  {
-    id: "CDE-7421",
-    pid: "PH-HSP-GMA",
-    severity: "high",
-    kind: "Spatial",
-    title: "GPS metadata inconsistent with site geofence",
-    desc: "Three uploaded inspection photos place evidence 1.4km outside declared site polygon.",
-    detected: "27s ago",
-  },
-  {
-    id: "CDE-7419",
-    pid: "BD-DR-CYC",
-    severity: "high",
-    kind: "Financial",
-    title: "Disbursement velocity exceeds milestone certification rate",
-    desc: "$3.2M disbursed against partially certified milestone M-14 in last 72h.",
-    detected: "8m ago",
-  },
-  {
-    id: "CDE-7415",
-    pid: "BD-DR-CYC",
-    severity: "med",
-    kind: "Temporal",
-    title: "Back-dated approval pattern",
-    desc: "Two workflow approvals dated prior to corresponding evidence upload timestamps.",
-    detected: "1h ago",
-  },
-  {
-    id: "CDE-7414",
-    pid: "GH-MN-ACR",
-    severity: "med",
-    kind: "Evidence Integrity",
-    title: "Duplicate image hash across milestone evidence",
-    desc: "Same image hash submitted under two different milestone IDs (M-04, M-06).",
-    detected: "2h ago",
-  },
-  {
-    id: "CDE-7411",
-    pid: "PH-HSP-GMA",
-    severity: "high",
-    kind: "Workflow",
-    title: "Missing dual-control on contract amendment",
-    desc: "Amendment #3 approved by a single role; policy requires Engineer + Ministry sign-off.",
-    detected: "3h ago",
-  },
-  {
-    id: "CDE-7408",
-    pid: "KE-PRT-MS3",
-    severity: "low",
-    kind: "Semantic",
-    title: "Inspection narrative diverges from sensor readings",
-    desc: "Reported strain-gauge baseline 4.2% higher than uploaded sensor log on M-09.",
-    detected: "yesterday",
-  },
-  {
-    id: "CDE-7402",
-    pid: "ID-EN-JKT",
-    severity: "med",
-    kind: "Financial",
-    title: "Currency rounding anomaly across line items",
-    desc: "Sub-line totals deviate from declared FX rate by ~$140K cumulatively.",
-    detected: "yesterday",
-  },
-  {
-    id: "CDE-7399",
-    pid: "NG-WT-LGS",
-    severity: "low",
-    kind: "Spatial",
-    title: "Evidence cluster outside expected sector polygon",
-    desc: "12 of 84 photos from Sector C tagged outside its standard boundary by <300m.",
-    detected: "2d ago",
-  },
-];
-
-const APPROVALS = [
-  {
-    id: "APR-9281",
-    pid: "RD-N4-EXP",
-    title: "Milestone M-14 certification",
-    requested: "Engineer · ANI",
-    submitted: "12m ago",
-    role: "Ministry",
-    sla: "due in 4h",
-    priority: "high",
-  },
-  {
-    id: "APR-9279",
-    pid: "CO-EN-LLR",
-    title: "Subcontractor onboarding (Llanos Solar EPC)",
-    requested: "Project Director",
-    submitted: "1h ago",
-    role: "Donor",
-    sla: "due in 22h",
-    priority: "med",
-  },
-  {
-    id: "APR-9276",
-    pid: "EG-HSP-CRO",
-    title: "Contract amendment #2 — scope variation",
-    requested: "Procurement",
-    submitted: "2h ago",
-    role: "Ministry · Donor",
-    sla: "due in 47h",
-    priority: "med",
-  },
-  {
-    id: "APR-9273",
-    pid: "TZ-ED-DSM",
-    title: "Mobilization disbursement tranche A",
-    requested: "Treasury",
-    submitted: "3h ago",
-    role: "Treasury",
-    sla: "due in 21h",
-    priority: "low",
-  },
-  {
-    id: "APR-9270",
-    pid: "MX-RD-OAX",
-    title: "Quarterly performance assurance package",
-    requested: "Project Director",
-    submitted: "6h ago",
-    role: "Auditor",
-    sla: "due tomorrow",
-    priority: "low",
-  },
-  {
-    id: "APR-9267",
-    pid: "VN-EN-MEK",
-    title: "Substation handover acceptance — A4",
-    requested: "Engineer",
-    submitted: "9h ago",
-    role: "Ministry",
-    sla: "due in 36h",
-    priority: "high",
-  },
-];
-
-// Approximate geo coords (lon, lat) for the map projection
+// Approximate geo coords (lon, lat) — pure UI config, lives in the
+// client because it drives the SVG map projection.
 const GEO = {
-  RD: [-70.16, 18.74],
-  KE: [37.91, -0.02],
-  PH: [121.77, 12.88],
-  CO: [-74.30, 4.57],
-  NG: [8.68, 9.08],
-  JO: [36.24, 30.59],
-  ID: [113.92, -0.79],
-  GH: [-1.02, 7.95],
-  BD: [90.36, 23.69],
-  MX: [-102.55, 23.63],
-  TZ: [34.89, -6.37],
-  PE: [-75.02, -9.19],
-  EG: [30.80, 26.82],
-  VN: [108.28, 14.06],
+  RD: [-70.16, 18.74], KE: [37.91, -0.02], PH: [121.77, 12.88],
+  CO: [-74.30, 4.57],  NG: [8.68, 9.08],   JO: [36.24, 30.59],
+  ID: [113.92, -0.79], GH: [-1.02, 7.95],  BD: [90.36, 23.69],
+  MX: [-102.55, 23.63], TZ: [34.89, -6.37], PE: [-75.02, -9.19],
+  EG: [30.80, 26.82],  VN: [108.28, 14.06],
 };
-const PROJECT_GEO = (id) => {
-  // map by region prefix
-  const region = id.split("-")[0];
-  return GEO[region] || [0, 0];
-};
-
-// Equirectangular projection helper
-const project = (lon, lat, w, h) => {
-  const x = ((lon + 180) / 360) * w;
-  const y = ((90 - lat) / 180) * h;
-  return [x, y];
-};
-
-// ════════════════════════════════════════════════════════════════════════════
-// ATOMS
+const PROJECT_GEO = (id) => GEO[id.split("-")[0]] || [0, 0];
+const project = (lon, lat, w, h) => [((lon + 180) / 360) * w, ((90 - lat) / 180) * h];
 // ════════════════════════════════════════════════════════════════════════════
 
 function Chip({ children, tone = "neutral", className = "", size = "sm" }) {
@@ -1470,6 +960,9 @@ const MODULES = [
 ];
 
 function Sidebar({ active, onNavigate, collapsed, mobileOpen, onCloseMobile }) {
+  const __ds = useStore().state;
+  const CONFLICTS = __ds.conflicts.filter((c) => !c.dismissed);
+  const APPROVALS = __ds.approvals.filter((a) => !a.decision);
   const grouped = useMemo(() => {
     const g = {};
     MODULES.forEach((m) => {
@@ -1788,6 +1281,80 @@ function ErrorToast() {
   );
 }
 
+// Topbar identity chip — shows the signed-in user's initials, name, and
+// role, with a click-to-logout menu.
+function AccountChip() {
+  const store = useStore();
+  const me = store.state.me;
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  if (!me) return null;
+  return (
+    <div ref={ref} className="hidden md:block relative pl-3 ml-1 border-l" style={{ borderColor: T.ink3 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 focus:outline-none focus-visible:ts-focus"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <div
+          className="w-7 h-7 flex items-center justify-center font-mono text-[10px] tracking-widest uppercase border"
+          style={{ borderColor: T.signal, color: T.signal }}
+          aria-hidden="true"
+        >
+          {me.initials}
+        </div>
+        <div className="hidden xl:flex flex-col leading-tight text-left">
+          <span className="text-[11px]" style={{ color: T.bone0 }}>{me.name}</span>
+          <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+            {me.role} · {me.tier}
+          </span>
+        </div>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 w-56 border shadow-lg"
+          style={{ borderColor: T.ink3, background: T.ink1, zIndex: 40 }}
+        >
+          <div className="px-3 py-2.5 border-b" style={{ borderColor: T.ink3 }}>
+            <div className="text-sm" style={{ color: T.bone0 }}>{me.name}</div>
+            <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+              {me.email}
+            </div>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              store.logout();
+            }}
+            className="w-full text-left px-3 py-2.5 text-[13px] focus:outline-none focus-visible:ts-focus"
+            style={{ color: T.bone0 }}
+          >
+            <span className="inline-flex items-center gap-2">
+              <KeyRound size={12} aria-hidden="true" style={{ color: T.bone2 }} />
+              Sign out
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopBar({
   active,
   onOpenPalette,
@@ -1907,32 +1474,7 @@ function TopBar({
             )}
           </button>
 
-          <div
-            className="hidden md:flex items-center gap-2 pl-3 ml-1 border-l"
-            style={{ borderColor: T.ink3 }}
-          >
-            <div
-              className="w-7 h-7 flex items-center justify-center font-mono text-[10px] tracking-widest uppercase border"
-              style={{ borderColor: T.signal, color: T.signal }}
-              aria-hidden="true"
-            >
-              SR
-            </div>
-            <div className="hidden xl:flex flex-col leading-tight">
-              <span
-                className="text-[11px]"
-                style={{ color: T.bone0 }}
-              >
-                S. Ramírez
-              </span>
-              <span
-                className="font-mono text-[9px] tracking-widest uppercase"
-                style={{ color: T.bone2 }}
-              >
-                Auditor · L4
-              </span>
-            </div>
-          </div>
+          <AccountChip />
         </div>
       </div>
     </header>
@@ -1944,6 +1486,7 @@ function TopBar({
 // ════════════════════════════════════════════════════════════════════════════
 
 function CommandPalette({ open, onClose, onNavigate, onOpenProject }) {
+  const PROJECTS = useStore().state.projects;
   const [q, setQ] = useState("");
   const ref = useRef(null);
   useFocusTrap(ref, open);
@@ -2100,8 +1643,8 @@ function AlertsPanel({ open, onClose, onOpenProject }) {
   useFocusTrap(ref, open);
   useKey("Escape", () => open && onClose(), [open, onClose]);
   if (!open) return null;
-  const sorted = CONFLICTS.filter(
-    (c) => !store.state.dismissedConflicts.includes(c.id)
+  const sorted = store.state.conflicts.filter(
+    (c) => !c.dismissed
   ).sort((a, b) => {
     const order = { high: 0, med: 1, low: 2 };
     return order[a.severity] - order[b.severity];
@@ -2221,6 +1764,7 @@ function AlertsPanel({ open, onClose, onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
+  const PROJECTS = useStore().state.projects;
   const ref = useRef(null);
   const reduced = usePrefersReducedMotion();
   const open = !!projectId;
@@ -2236,7 +1780,7 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
   }, [projectId, open]);
 
   const project = useMemo(
-    () => [...extraProjects, ...PROJECTS].find((p) => p.id === projectId),
+    () => PROJECTS.find((p) => p.id === projectId),
     [projectId, extraProjects]
   );
 
@@ -2686,10 +2230,11 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function OverviewView({ onOpenProject, onNavigate }) {
+  const PROJECTS = useStore().state.projects;
   const store = useStore();
   const all = useMemo(
-    () => [...store.state.projects, ...PROJECTS],
-    [store.state.projects]
+    () => PROJECTS,
+    [PROJECTS]
   );
   const totals = useMemo(() => {
     const budget = all.reduce((s, p) => s + p.budget, 0);
@@ -3000,6 +2545,7 @@ function OverviewView({ onOpenProject, onNavigate }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ProjectsView({ onOpenProject, extra = [] }) {
+  const PROJECTS = useStore().state.projects;
   const [query, setQuery] = useState("");
   const [sectorFilter, setSectorFilter] = useState("ALL");
   const [riskFilter, setRiskFilter] = useState("ALL");
@@ -3007,7 +2553,7 @@ function ProjectsView({ onOpenProject, extra = [] }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return [...extra, ...PROJECTS].filter((p) => {
+    return PROJECTS.filter((p) => {
       if (sectorFilter !== "ALL" && p.sector !== sectorFilter) return false;
       if (riskFilter !== "ALL" && p.risk !== riskFilter) return false;
       if (
@@ -3028,7 +2574,7 @@ function ProjectsView({ onOpenProject, extra = [] }) {
         ? String(ka).localeCompare(String(kb))
         : String(kb).localeCompare(String(ka));
     });
-  }, [query, sectorFilter, riskFilter, sortBy, extra]);
+  }, [query, sectorFilter, riskFilter, sortBy, PROJECTS]);
 
   const sortFor = (key) =>
     setSortBy((prev) =>
@@ -3310,6 +2856,7 @@ function Select({ label, value, onChange, options }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function EvidenceView({ onOpenProject }) {
+  const PROJECTS = useStore().state.projects;
   const reduced = usePrefersReducedMotion();
   const store = useStore();
   const [entries, setEntries] = useState([]);
@@ -3658,6 +3205,7 @@ function EvidenceView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function I3AnalyticsView({ onOpenProject }) {
+  const PROJECTS = useStore().state.projects;
   const dims = [
     { k: "Financial", v: 81 },
     { k: "Schedule", v: 68 },
@@ -3926,9 +3474,11 @@ function I3RadialGauge({ value }) {
 
 function ConflictsView({ onOpenProject }) {
   const store = useStore();
+  const PROJECTS = store.state.projects;
+  const CONFLICTS = store.state.conflicts;
   const [sev, setSev] = useState("ALL");
   const [kind, setKind] = useState("ALL");
-  const live = CONFLICTS.filter((c) => !store.state.dismissedConflicts.includes(c.id));
+  const live = CONFLICTS.filter((c) => !c.dismissed);
   const filtered = live.filter(
     (c) =>
       (sev === "ALL" || c.severity === sev) &&
@@ -4034,7 +3584,7 @@ function ConflictsView({ onOpenProject }) {
           className="font-mono text-[10px] tracking-widest uppercase"
           style={{ color: T.bone2 }}
         >
-          {filtered.length} of {live.length} active · {store.state.dismissedConflicts.length} dismissed
+          {filtered.length} of {live.length} active · {CONFLICTS.filter((c) => c.dismissed).length} dismissed
         </span>
         <Button
           size="xs"
@@ -4063,11 +3613,10 @@ function ConflictsView({ onOpenProject }) {
 
 function ApprovalsView({ onOpenProject }) {
   const store = useStore();
-  const decided = store.state.approvals;
-  const decide = (id, choice) => {
-    const a = APPROVALS.find((x) => x.id === id);
-    store.decideApproval(id, choice, a?.title || id, a?.pid);
-  };
+  const PROJECTS = store.state.projects;
+  const APPROVALS = store.state.approvals;
+  const decided = Object.fromEntries(APPROVALS.filter((a) => a.decision).map((a) => [a.id, a.decision]));
+  const decide = (id, choice) => store.decideApproval(id, choice);
   const queue = APPROVALS;
   const pending = queue.filter((a) => !decided[a.id]);
 
@@ -4199,6 +3748,7 @@ function ApprovalsView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function DisbursementsView() {
+  const PROJECTS = useStore().state.projects;
   const totalBudget = PROJECTS.reduce((s, p) => s + p.budget, 0);
   const totalSpent = PROJECTS.reduce((s, p) => s + p.spent, 0);
   const trend = Array.from({ length: 12 }).map((_, i) => ({
@@ -4317,6 +3867,7 @@ function DisbursementsView() {
 // ════════════════════════════════════════════════════════════════════════════
 
 function GeoView({ onOpenProject }) {
+  const PROJECTS = useStore().state.projects;
   const W = 880;
   const H = 440;
   const [hover, setHover] = useState(null);
@@ -4467,6 +4018,7 @@ function GeoView({ onOpenProject }) {
 
 function AuditView({ onOpenProject }) {
   const store = useStore();
+  const PROJECTS = store.state.projects;
   const [uploadOpen, setUploadOpen] = useState(false);
   const extra = store.state.auditEvents;
   const events = useMemo(() => {
@@ -4621,47 +4173,12 @@ const CONTRACTORS = [
 ];
 const PROC_METHODS = ["ICB", "NCB", "QCBS", "Direct"];
 
-const CONTRACTS = PROJECTS.map((p, i) => {
-  const value = Math.round(p.budget * 0.82);
-  const status =
-    p.progress >= 96
-      ? "closed"
-      : p.alerts >= 3
-      ? "amended"
-      : p.progress < 25
-      ? "awarded"
-      : "active";
-  return {
-    id: `CT-${p.id}`,
-    pid: p.id,
-    title: `${p.name} — Principal Works`,
-    contractor: CONTRACTORS[i % CONTRACTORS.length],
-    value,
-    signed: p.started,
-    status,
-    method: PROC_METHODS[i % PROC_METHODS.length],
-    amendments: p.alerts > 2 ? 3 : p.alerts,
-  };
-});
-
-const CHANGE_ORDERS = [
-  { id: "CO-3104", pid: "PH-HSP-GMA", title: "Structural reinforcement — seismic Annex B", delta: 8_400_000, reason: "Scope variation", status: "pending", raised: "2d ago", approvals: "Engineer · Ministry" },
-  { id: "CO-3101", pid: "BD-DR-CYC", title: "Additional drainage culverts — Sector 4", delta: 2_100_000, reason: "Site condition", status: "approved", raised: "6d ago", approvals: "Engineer · Ministry · Donor" },
-  { id: "CO-3098", pid: "KE-PRT-MS3", title: "Quay crane rail re-grade", delta: 3_650_000, reason: "Design correction", status: "pending", raised: "9d ago", approvals: "Engineer" },
-  { id: "CO-3094", pid: "GH-MN-ACR", title: "Deduct — reduced pump station count", delta: -1_250_000, reason: "Value engineering", status: "approved", raised: "12d ago", approvals: "Engineer · Ministry" },
-  { id: "CO-3090", pid: "ID-EN-JKT", title: "Transmission tower route deviation", delta: 5_900_000, reason: "Land access", status: "disputed", raised: "15d ago", approvals: "Engineer · Ministry" },
-];
-
+// Server-backed collections — populated via the store. Empty stubs at
+// module scope keep render paths safe before /api/state hydrates.
+const CONTRACTS = [];
+const CHANGE_ORDERS = [];
 const WF_STAGES = ["Engineer", "Project Manager", "Auditor", "Ministry", "Donor", "Finance"];
-const WORKFLOWS = [
-  { id: "WF-5521", pid: "RD-N4-EXP", title: "Milestone M-14 certification", stage: 3, sla: "due 4h", blocked: false, kind: "Milestone" },
-  { id: "WF-5519", pid: "PH-HSP-GMA", title: "Contract amendment #3 sign-off", stage: 1, sla: "overdue 6h", blocked: true, kind: "Amendment" },
-  { id: "WF-5516", pid: "BD-DR-CYC", title: "Disbursement tranche M-12", stage: 4, sla: "due 18h", blocked: false, kind: "Payment" },
-  { id: "WF-5512", pid: "CO-EN-LLR", title: "Subcontractor onboarding", stage: 2, sla: "due 22h", blocked: false, kind: "Onboarding" },
-  { id: "WF-5508", pid: "KE-PRT-MS3", title: "Change order CO-3098 routing", stage: 0, sla: "due 2d", blocked: false, kind: "Change Order" },
-  { id: "WF-5503", pid: "EG-HSP-CRO", title: "Quarterly assurance package", stage: 5, sla: "due 36h", blocked: false, kind: "Reporting" },
-  { id: "WF-5499", pid: "VN-EN-MEK", title: "Substation A4 handover acceptance", stage: 2, sla: "overdue 2h", blocked: true, kind: "Handover" },
-];
+const WORKFLOWS = [];
 const WF_RULES = [
   "Inspection evidence required before financial approval",
   "Donor signature mandatory for contracts above $5M",
@@ -4674,32 +4191,14 @@ const WF_FAILSAFES = [
   "No reversal without a blockchain-logged justification",
   "Real-time escalation alerts to supervisors on SLA breach",
 ];
-
-const SIGNATURES = [
-  { id: "SIG-8841", pid: "RD-N4-EXP", doc: "Milestone M-14 Certificate", role: "Ministry Director", seq: "3 of 5", status: "pending", actor: "F. Haddad", when: "due 4h", geo: "Santo Domingo · DO", method: "MFA + Biometric" },
-  { id: "SIG-8838", pid: "PH-HSP-GMA", doc: "Contract Amendment #3", role: "Project Engineer", seq: "1 of 4", status: "pending", actor: "P. dela Cruz", when: "overdue 6h", geo: "Manila · PH", method: "MFA" },
-  { id: "SIG-8835", pid: "EG-HSP-CRO", doc: "Disbursement Authorization", role: "Finance Controller", seq: "4 of 4", status: "signed", actor: "N. Saleh", when: "2h ago", geo: "Cairo · EG", method: "MFA + Hardware Key" },
-  { id: "SIG-8830", pid: "KE-PRT-MS3", doc: "Inspection Report M-09", role: "Third-party Inspector", seq: "2 of 3", status: "signed", actor: "M. Otieno", when: "5h ago", geo: "Mombasa · KE", method: "MFA + Biometric" },
-  { id: "SIG-8826", pid: "BD-DR-CYC", doc: "Change Order CO-3101", role: "Donor Representative", seq: "3 of 3", status: "declined", actor: "USAID Monitor", when: "yesterday", geo: "Dhaka · BD", method: "MFA" },
-  { id: "SIG-8821", pid: "CO-EN-LLR", doc: "Subcontractor Agreement", role: "Procurement Lead", seq: "1 of 3", status: "pending", actor: "L. Moreno", when: "due 20h", geo: "Bogotá · CO", method: "MFA" },
-];
-
+const SIGNATURES = [];
 const LEDGER_STATES = ["Draft", "Pending Sync", "Pending Consensus", "Verified", "Locked", "Disputed", "Auditor Review", "Reconciled"];
-const LEDGER_RECORDS = [
-  { id: "LR-44120", pid: "KE-PRT-MS3", type: "Financial", unit: "usd", state: 2, gov: 522_300_000, donor: 519_800_000, contractor: 524_100_000, updated: "3m ago" },
-  { id: "LR-44117", pid: "PH-HSP-GMA", type: "Milestone", unit: "pct", state: 5, gov: 81, donor: 62, contractor: 88, updated: "11m ago" },
-  { id: "LR-44113", pid: "BD-DR-CYC", type: "Change Order", unit: "usd", state: 5, gov: 2_100_000, donor: 0, contractor: 2_100_000, updated: "26m ago" },
-  { id: "LR-44109", pid: "RD-N4-EXP", type: "Milestone", unit: "pct", state: 7, gov: 64, donor: 64, contractor: 64, updated: "1h ago" },
-  { id: "LR-44104", pid: "ID-EN-JKT", type: "Financial", unit: "usd", state: 6, gov: 408_500_000, donor: 408_500_000, contractor: 414_400_000, updated: "2h ago" },
-  { id: "LR-44098", pid: "EG-HSP-CRO", type: "Procurement", unit: "n", state: 7, gov: 1, donor: 1, contractor: 1, updated: "3h ago" },
-  { id: "LR-44091", pid: "CO-EN-LLR", type: "Contract", unit: "usd", state: 3, gov: 278_800_000, donor: 278_800_000, contractor: 278_800_000, updated: "5h ago" },
-];
+const LEDGER_RECORDS = [];
 const CONSENSUS_TRIGGERS = [
   { name: "Disbursement Trigger", rule: "Contractor submits → Inspector verifies → ledger marks Verified → payment execution allowed.", icon: Banknote },
   { name: "Change Order Trigger", rule: "Engineer + Ministry + Donor approval required before a variation is accepted.", icon: GitBranch },
   { name: "Procurement Integrity Trigger", rule: "On anomaly the ledger halts milestone reporting and alerts the auditor automatically.", icon: ShieldAlert },
 ];
-
 const RISK_MODELS = ["Gradient Boosting", "Random Forest", "Logistic Regression", "Temporal Anomaly"];
 const RISK_DRIVERS = {
   critical: ["Disbursement velocity anomaly", "Repeated evidence hash collisions", "Approval sequence compression"],
@@ -4707,13 +4206,15 @@ const RISK_DRIVERS = {
   elevated: ["Minor GPS metadata drift", "Single-role amendment pattern"],
   low: ["No material anomalies detected"],
 };
-const RISK = PROJECTS.map((p, i) => {
-  const fraud = Math.min(98, Math.max(3, Math.round(100 - p.i3 + p.alerts * 5)));
-  const tamper = Math.min(95, Math.max(2, Math.round(fraud * 0.7 + p.alerts * 3)));
-  const cls = fraud >= 70 ? "critical" : fraud >= 50 ? "high" : fraud >= 30 ? "elevated" : "low";
-  return { pid: p.id, fraud, tamper, cls, model: RISK_MODELS[i % RISK_MODELS.length], drivers: RISK_DRIVERS[cls] };
-});
-
+// Risk view computes its rows from current store.state.projects.
+function deriveRisk(projects) {
+  return projects.map((p, i) => {
+    const fraud = Math.min(98, Math.max(3, Math.round(100 - p.i3 + p.alerts * 5)));
+    const tamper = Math.min(95, Math.max(2, Math.round(fraud * 0.7 + p.alerts * 3)));
+    const cls = fraud >= 70 ? "critical" : fraud >= 50 ? "high" : fraud >= 30 ? "elevated" : "low";
+    return { pid: p.id, fraud, tamper, cls, model: RISK_MODELS[i % RISK_MODELS.length], drivers: RISK_DRIVERS[cls] };
+  });
+}
 const REPORT_TEMPLATES = [
   { id: "tpl-wb-isr", name: "World Bank — Implementation Status Report", fmt: "PDF", cadence: "Quarterly" },
   { id: "tpl-donor-q", name: "Donor Quarterly Disbursement Report", fmt: "XLSX", cadence: "Quarterly" },
@@ -4721,13 +4222,7 @@ const REPORT_TEMPLATES = [
   { id: "tpl-ocds", name: "Open Contracting (OCDS) Export", fmt: "JSON", cadence: "Monthly" },
   { id: "tpl-pfm", name: "Public Financial Management Reconciliation", fmt: "CSV", cadence: "Monthly" },
 ];
-const REPORTS = [
-  { id: "RPT-2291", template: "World Bank — ISR", pid: "KE-PRT-MS3", generated: "2h ago", fmt: "PDF", status: "ready", size: "4.2 MB" },
-  { id: "RPT-2288", template: "Donor Quarterly", pid: "EG-HSP-CRO", generated: "6h ago", fmt: "XLSX", status: "ready", size: "1.1 MB" },
-  { id: "RPT-2285", template: "Audit Evidence Pack", pid: "PH-HSP-GMA", generated: "—", fmt: "PDF", status: "generating", size: "—" },
-  { id: "RPT-2280", template: "OCDS Export", pid: "ALL", generated: "1d ago", fmt: "JSON", status: "ready", size: "812 KB" },
-  { id: "RPT-2277", template: "PFM Reconciliation", pid: "ALL", generated: "—", fmt: "CSV", status: "scheduled", size: "—" },
-];
+const REPORTS = [];
 
 const IDENTITY_TYPES = [
   { type: "Government", icon: Landmark, count: 142, ex: "Public Works, Finance, Planning, municipal authorities" },
@@ -4814,9 +4309,12 @@ function WorkflowStepper({ stage, blocked }) {
 
 function ContractsView({ onOpenProject }) {
   const store = useStore();
+  const PROJECTS = store.state.projects;
+  const CONTRACTS = store.state.contracts;
+  const CHANGE_ORDERS = store.state.changeOrders;
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [newOpen, setNewOpen] = useState(false);
-  const all = [...store.state.contracts, ...CONTRACTS];
+  const all = CONTRACTS;
   const totalValue = all.reduce((s, c) => s + c.value, 0);
   const active = all.filter((c) => c.status === "active").length;
   const amendTotal = all.reduce((s, c) => s + c.amendments, 0);
@@ -4848,7 +4346,7 @@ function ContractsView({ onOpenProject }) {
         <KPI label="Amendments" value={amendTotal} delta={3.0} sublabel="cumulative variations" />
         <KPI
           label="Change orders"
-          value={CHANGE_ORDERS.filter((c) => (store.state.changeOrders[c.id] || c.status) === "pending").length}
+          value={CHANGE_ORDERS.filter((c) => c.status === "pending").length}
           sublabel="pending decision"
         />
       </div>
@@ -4945,7 +4443,7 @@ function ContractsView({ onOpenProject }) {
         <ul className="divide-y" style={{ borderColor: T.ink3 }}>
           {CHANGE_ORDERS.map((c) => {
             const p = PROJECTS.find((x) => x.id === c.pid);
-            const status = store.state.changeOrders[c.id] || c.status;
+            const status = c.status;
             return (
               <li key={c.id} className="px-5 md:px-6 py-4 flex flex-col md:flex-row md:items-center gap-4" style={{ borderColor: T.ink3 }}>
                 <Chip
@@ -4968,10 +4466,10 @@ function ContractsView({ onOpenProject }) {
                 </span>
                 {status === "pending" && (
                   <span className="shrink-0 flex items-center gap-2">
-                    <Button size="xs" variant="danger" onClick={() => store.decideChangeOrder(c.id, "rejected", c.title, c.pid)}>
+                    <Button size="xs" variant="danger" onClick={() => store.decideChangeOrder(c.id, "rejected")}>
                       Reject
                     </Button>
-                    <Button size="xs" variant="primary" iconLeft={BadgeCheck} onClick={() => store.decideChangeOrder(c.id, "approved", c.title, c.pid)}>
+                    <Button size="xs" variant="primary" iconLeft={BadgeCheck} onClick={() => store.decideChangeOrder(c.id, "approved")}>
                       Approve
                     </Button>
                   </span>
@@ -4990,6 +4488,9 @@ function ContractsView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function WorkflowsView({ onOpenProject }) {
+  const __ds = useStore().state;
+  const WORKFLOWS = __ds.workflows;
+  const PROJECTS = __ds.projects;
   const blocked = WORKFLOWS.filter((w) => w.blocked).length;
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
@@ -5071,12 +4572,9 @@ function WorkflowsView({ onOpenProject }) {
 
 function SignaturesView({ onOpenProject }) {
   const store = useStore();
+  const PROJECTS = store.state.projects;
   const [target, setTarget] = useState(null);
-  const sigs = SIGNATURES.map((s) =>
-    store.state.sigOverrides[s.id]
-      ? { ...s, status: store.state.sigOverrides[s.id], when: "this session" }
-      : s
-  );
+  const sigs = store.state.signatures;
   const pending = sigs.filter((s) => s.status === "pending").length;
   const signed = sigs.filter((s) => s.status === "signed").length;
   const statusTone = { pending: "warn", signed: "verified", declined: "risk" };
@@ -5086,7 +4584,7 @@ function SignaturesView({ onOpenProject }) {
         <SignModal
           signature={target}
           onClose={() => setTarget(null)}
-          onComplete={(id, choice) => store.setSignature(id, choice, target.doc, target.pid)}
+          onComplete={(id, choice) => store.setSignature(id, choice)}
         />
       )}
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
@@ -5173,6 +4671,9 @@ function SignaturesView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function LedgerSyncView({ onOpenProject }) {
+  const __ds = useStore().state;
+  const LEDGER_RECORDS = __ds.ledger;
+  const PROJECTS = __ds.projects;
   const fmtVal = (v, unit) =>
     unit === "usd" ? fmtUSD(v) : unit === "pct" ? `${v}%` : String(v);
   const disputed = LEDGER_RECORDS.filter((r) => LEDGER_STATES[r.state] === "Disputed").length;
@@ -5280,6 +4781,8 @@ function LedgerSyncView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function RiskView({ onOpenProject }) {
+  const PROJECTS = useStore().state.projects;
+  const RISK = deriveRisk(PROJECTS);
   const clsTone = { critical: "risk", high: "risk", elevated: "warn", low: "verified" };
   const clsColor = { critical: T.alert, high: T.alert, elevated: T.amber, low: T.signal };
   const sorted = [...RISK].sort((a, b) => b.fraud - a.fraud);
@@ -5358,6 +4861,10 @@ function RiskView({ onOpenProject }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function PortalView() {
+  const __ds = useStore().state;
+  const PROJECTS = __ds.projects;
+  const CONTRACTS = __ds.contracts;
+  const DONORS = [...new Set(PROJECTS.map((p) => p.donor))].sort();
   const [feedback, setFeedback] = useState("");
   const [sent, setSent] = useState(false);
   const reduced = usePrefersReducedMotion();
@@ -5485,8 +4992,8 @@ function PortalView() {
 function ReportsView() {
   const store = useStore();
   const statusTone = { ready: "verified", generating: "warn", scheduled: "info" };
-  const reports = [...store.state.reports, ...REPORTS];
-  const allProjects = [...store.state.projects, ...PROJECTS];
+  const reports = store.state.reports;
+  const allProjects = store.state.projects;
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
@@ -5576,6 +5083,15 @@ function ReportsView() {
 
 function AccessView() {
   const store = useStore();
+  const SESSIONS = store.state.users.map((u) => ({
+    user: u.name,
+    role: `${u.role} · ${u.tier}`,
+    device: u.lastLoginAt ? "recent session" : "never",
+    ip: "—",
+    geo: u.email,
+    when: u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "never signed in",
+    isMe: u.username === store.state.me?.username,
+  }));
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const invites = store.state.invites;
@@ -5714,18 +5230,28 @@ function AccessView() {
               </tr>
             </thead>
             <tbody>
-              {SESSIONS.map((s) => (
-                <tr key={s.user + s.ip} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
-                  <td className="px-4 py-3 align-middle" style={{ color: T.bone0 }}>{s.user}</td>
-                  <td className="px-4 py-3 align-middle font-mono text-[11px] tracking-widest uppercase" style={{ color: T.bone1 }}>{s.role}</td>
-                  <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.device}</td>
-                  <td className="px-4 py-3 align-middle font-mono text-[11px]" style={{ color: T.bone2 }}>{s.ip}</td>
-                  <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.geo}</td>
-                  <td className="px-4 py-3 align-middle font-mono text-[10px] tracking-widest uppercase" style={{ color: s.when === "active now" ? T.signal : T.bone2 }}>
-                    {s.when}
-                  </td>
-                </tr>
-              ))}
+              {SESSIONS.map((s) => {
+                const live = s.isMe;
+                return (
+                  <tr key={s.user + s.geo} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
+                    <td className="px-4 py-3 align-middle" style={{ color: T.bone0 }}>
+                      {s.user}
+                      {live && (
+                        <span className="ml-2 font-mono text-[9px] tracking-widest uppercase" style={{ color: T.signal }}>
+                          you
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-middle font-mono text-[11px] tracking-widest uppercase" style={{ color: T.bone1 }}>{s.role}</td>
+                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.device}</td>
+                    <td className="px-4 py-3 align-middle font-mono text-[11px]" style={{ color: T.bone2 }}>{s.ip}</td>
+                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.geo}</td>
+                    <td className="px-4 py-3 align-middle font-mono text-[10px] tracking-widest uppercase" style={{ color: live ? T.signal : T.bone2 }}>
+                      {live ? "active now" : s.when}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -5959,6 +5485,7 @@ function Dropzone({ files, onFiles, sample }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function UploadEvidenceModal({ onClose, onComplete, fixedProject }) {
+  const PROJECTS = useStore().state.projects;
   const steps = ["Project", "Files", "Verify", "Anchor"];
   const [step, setStep] = useState(0);
   const [pid, setPid] = useState(fixedProject || PROJECTS[0].id);
@@ -6143,6 +5670,7 @@ const ONBOARD_ROLES = {
 };
 
 function OnboardModal({ onClose, onComplete }) {
+  const PROJECTS = useStore().state.projects;
   const steps = ["Type", "Organization", "Compliance", "Access", "Review"];
   const [step, setStep] = useState(0);
   const [type, setType] = useState("Contractor");
@@ -6333,6 +5861,7 @@ function OnboardModal({ onClose, onComplete }) {
 const CONTRACT_MILESTONES = ["Mobilization", "Earthworks", "Structural", "Finishes", "Handover"];
 
 function NewContractModal({ onClose, onComplete }) {
+  const PROJECTS = useStore().state.projects;
   const steps = ["Project", "Award", "Schedule", "Review"];
   const [step, setStep] = useState(0);
   const [pid, setPid] = useState(PROJECTS[0].id);
@@ -6480,6 +6009,7 @@ function NewContractModal({ onClose, onComplete }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function SignModal({ signature, onClose, onComplete }) {
+  const PROJECTS = useStore().state.projects;
   const [code, setCode] = useState("");
   const [done, setDone] = useState(null);
   const p = PROJECTS.find((x) => x.id === signature.pid);
@@ -6579,6 +6109,7 @@ const COUNTRY_FLAG = Object.fromEntries(PROJECTS.map((p) => [p.country, p.flag])
 const RISK_BASE_I3 = { low: 78.5, elevated: 64.0, high: 49.5, critical: 36.0 };
 
 function NewProjectModal({ onClose, onComplete }) {
+  const PROJECTS = useStore().state.projects;
   const steps = ["Identity", "Funding", "Schedule", "Review"];
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
@@ -6876,7 +6407,7 @@ function GenerateBriefModal({ projects, onClose }) {
 function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProject }) {
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
-  const allProjects = [...extraProjects, ...PROJECTS];
+  const allProjects = PROJECTS;
   const PageHeader = ({ title, subtitle, action }) => (
     <div className="mb-5 md:mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -7108,10 +6639,195 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
 // ROOT
 // ════════════════════════════════════════════════════════════════════════════
 
+// Demo credentials surfaced in the login screen so an operator can sign
+// in without prior context. Mirrors SEED_USERS in server/seed.js.
+const DEMO_CREDENTIALS = [
+  { username: "admin", password: "trustsfer-2026", role: "Auditor · L4" },
+  { username: "ministry", password: "ministry-2026", role: "Ministry · L4" },
+  { username: "inspector", password: "inspector-2026", role: "Inspector · L2" },
+  { username: "donor", password: "donor-2026", role: "Donor · L4" },
+];
+
+function LoginScreen() {
+  const store = useStore();
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("trustsfer-2026");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await store.login(username.trim(), password);
+    } catch (e) {
+      setErr(e.message || "Sign in failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center px-4 py-10"
+      style={{
+        background: T.ink0,
+        color: T.bone0,
+        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..700,30..100&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+        :root { color-scheme: light; }
+        body { background: ${T.ink0}; margin: 0; }
+        .ts-focus { outline: 2px solid ${T.signal}; outline-offset: 2px; }
+      `}</style>
+
+      <div className="w-full max-w-[920px] grid md:grid-cols-2 gap-px border" style={{ borderColor: T.ink3, background: T.ink3 }}>
+        <div className="p-8 md:p-10" style={{ background: T.ink1 }}>
+          <div className="flex items-center gap-2.5 mb-8">
+            <span
+              className="inline-flex items-center justify-center w-9 h-9 border"
+              style={{ borderColor: T.signal }}
+            >
+              <ShieldCheck size={18} style={{ color: T.signal }} aria-hidden="true" />
+            </span>
+            <div>
+              <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                TrustSfer
+              </div>
+              <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone3 }}>
+                Verifiable Public Works
+              </div>
+            </div>
+          </div>
+
+          <h1
+            className="font-serif text-3xl leading-tight"
+            style={{ fontFamily: "Fraunces, serif", fontWeight: 400, color: T.bone0 }}
+          >
+            Sign in to the workspace.
+          </h1>
+          <p className="mt-2 text-sm" style={{ color: T.bone1 }}>
+            Government-grade access to the integrity ledger. All actions are anchored, attributable, and reviewable.
+          </p>
+
+          <form onSubmit={submit} className="mt-7 space-y-4">
+            <label className="block">
+              <span className="block font-mono text-[10px] tracking-widest uppercase mb-1.5" style={{ color: T.bone2 }}>
+                Username
+              </span>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                autoComplete="username"
+                className="w-full bg-transparent border outline-none px-3 py-2 text-sm focus:outline-none focus-visible:ts-focus"
+                style={{ borderColor: T.ink3, color: T.bone0 }}
+              />
+            </label>
+            <label className="block">
+              <span className="block font-mono text-[10px] tracking-widest uppercase mb-1.5" style={{ color: T.bone2 }}>
+                Password
+              </span>
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type="password"
+                autoComplete="current-password"
+                className="w-full bg-transparent border outline-none px-3 py-2 text-sm focus:outline-none focus-visible:ts-focus"
+                style={{ borderColor: T.ink3, color: T.bone0 }}
+              />
+            </label>
+            {err && (
+              <div
+                className="px-3 py-2 border text-[12px]"
+                style={{ borderColor: tint(T.alert, 0.4), background: tint(T.alert, 0.06), color: T.alert }}
+              >
+                {err}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border font-mono text-[11px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus disabled:opacity-60"
+              style={{ background: T.signal, color: T.ink0, borderColor: T.signal }}
+            >
+              {busy ? "Signing in…" : "Sign in"}
+              {!busy && <ArrowRight size={12} aria-hidden="true" />}
+            </button>
+          </form>
+        </div>
+
+        <div className="p-8 md:p-10 hidden md:block" style={{ background: T.ink2 }}>
+          <div className="font-mono text-[10px] tracking-widest uppercase mb-3" style={{ color: T.bone2 }}>
+            Demo credentials
+          </div>
+          <p className="text-[12px] leading-relaxed mb-5" style={{ color: T.bone1 }}>
+            Click a role below to autofill the form. Every account writes to the same ledger; the differences are role, access tier, and which actions you can attest to.
+          </p>
+          <ul className="space-y-2">
+            {DEMO_CREDENTIALS.map((c) => (
+              <li key={c.username}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsername(c.username);
+                    setPassword(c.password);
+                  }}
+                  className="w-full text-left px-3 py-2.5 border focus:outline-none focus-visible:ts-focus"
+                  style={{
+                    borderColor: username === c.username ? T.signal : T.ink3,
+                    background: username === c.username ? tint(T.signal, 0.08) : T.ink1,
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm" style={{ color: T.bone0 }}>{c.username}</span>
+                    <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {c.role}
+                    </span>
+                  </div>
+                  <code className="block mt-0.5 font-mono text-[10px]" style={{ color: T.bone3 }}>
+                    {c.password}
+                  </code>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuthGate() {
+  const store = useStore();
+  const { state, authToken } = store;
+  if (!authToken) return <LoginScreen />;
+  if (!state.me) {
+    // Token present but state still hydrating — render a quiet splash.
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{
+          background: T.ink0,
+          color: T.bone1,
+          fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+        }}
+      >
+        <RefreshCw size={24} className="ts-spin" style={{ color: T.signal }} aria-hidden="true" />
+      </div>
+    );
+  }
+  return <DashboardShell />;
+}
+
 export default function TrustSferDashboard() {
   return (
     <StoreProvider>
-      <DashboardShell />
+      <AuthGate />
     </StoreProvider>
   );
 }
@@ -7272,8 +6988,8 @@ function DashboardShell() {
             onToggleCollapse={() => setCollapsed((v) => !v)}
             onOpenAlerts={() => setAlertsOpen(true)}
             alertCount={
-              CONFLICTS.filter(
-                (c) => c.severity !== "low" && !store.state.dismissedConflicts.includes(c.id)
+              store.state.conflicts.filter(
+                (c) => c.severity !== "low" && !c.dismissed
               ).length
             }
           />
