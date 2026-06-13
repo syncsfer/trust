@@ -8,7 +8,17 @@ import path from "path";
 import fs from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.TRUSTSFER_DB || path.join(__dirname, "..", "data.db");
+
+// Pick a writable location for the SQLite file. On serverless hosts
+// (Vercel, AWS Lambda) the deployment filesystem is read-only and only
+// /tmp is writable — and that storage is ephemeral, so data resets on a
+// cold start. Set TRUSTSFER_DB to a mounted volume or hosted database
+// path for durable persistence.
+const ON_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const DEFAULT_DB = ON_SERVERLESS
+  ? path.join("/tmp", "trustsfer-data.db")
+  : path.join(__dirname, "..", "data.db");
+const DB_PATH = process.env.TRUSTSFER_DB || DEFAULT_DB;
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 export const db = new Database(DB_PATH);

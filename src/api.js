@@ -73,6 +73,10 @@ export const api = {
   logout: () => request("POST", "/auth/logout"),
   me: () => request("GET", "/auth/me"),
   listUsers: () => request("GET", "/auth/users"),
+  createUser: (u) => request("POST", "/auth/users", u),
+  deleteUser: (username) => request("DELETE", `/auth/users/${encodeURIComponent(username)}`),
+  changePassword: (currentPassword, newPassword) =>
+    request("POST", "/auth/password", { currentPassword, newPassword }),
   getState: () => request("GET", "/state"),
   addProject: (p) => request("POST", "/projects", p),
   addEvidence: (d) => request("POST", "/evidence", d),

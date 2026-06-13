@@ -320,6 +320,7 @@ function makePdf(title, lines) {
 // ════════════════════════════════════════════════════════════════════════════
 
 import { api, getToken, setToken, onAuthChange } from "./api";
+import { auth0Configured, auth0Login, auth0Resume, auth0Logout } from "./auth0";
 
 const EMPTY_STATE = {
   me: null,
@@ -393,6 +394,29 @@ function StoreProvider({ children }) {
   // Track token changes (login, logout, 401 auto-clear).
   useEffect(() => onAuthChange(() => setAuthToken(getToken())), []);
 
+  // Resume an Auth0 session on boot: completes the redirect callback if
+  // we just came back from the Auth0 universal login page, otherwise
+  // silently picks up an existing session. No-op when Auth0 isn't
+  // configured or a local token is already present.
+  const [auth0Booting, setAuth0Booting] = useState(auth0Configured);
+  useEffect(() => {
+    if (!auth0Configured) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await auth0Resume();
+        if (!cancelled && token && !getToken()) setToken(token);
+      } catch (e) {
+        /* fall back to local login */
+      } finally {
+        if (!cancelled) setAuth0Booting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Hydrate whenever the token changes.
   useEffect(() => {
     if (!authToken) {
@@ -462,12 +486,20 @@ function StoreProvider({ children }) {
         return user;
       },
       async logout() {
+        const wasAuth0 = stateRef.current.me?.provider === "auth0";
         try {
           await api.logout();
         } catch (e) {
           /* ignore */
         }
         setToken(null);
+        if (wasAuth0) {
+          try {
+            await auth0Logout();
+          } catch (e) {
+            /* local sign-out already done */
+          }
+        }
       },
       addProject(p) {
         run({ type: "ADD_PROJECT", payload: p }, () => api.addProject(p));
@@ -536,6 +568,18 @@ function StoreProvider({ children }) {
         );
         return id;
       },
+      async refresh() {
+        try {
+          const snap = await api.getState();
+          dispatch({ type: "HYDRATE", payload: snap });
+        } catch (e) {
+          /* keep current state */
+        }
+      },
+      notifyError(message) {
+        dispatch({ type: "SET_ERROR", error: message });
+        setTimeout(() => dispatch({ type: "SET_ERROR", error: null }), 4500);
+      },
       async reset() {
         dispatch({ type: "RESET" });
         try {
@@ -550,11 +594,16 @@ function StoreProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ ...actions, state, authToken }),
-    [actions, state, authToken]
+    () => ({ ...actions, state, authToken, auth0Booting }),
+    [actions, state, authToken, auth0Booting]
   );
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
+
+// Tier helper for UI gating. Mirrors the server's requireTier ordering.
+const TIER_ORDER = ["L0", "L2", "L3", "L4"];
+const canTier = (me, min) =>
+  !!me && TIER_ORDER.indexOf(me.tier) >= TIER_ORDER.indexOf(min);
 
 // Builds the export payload for a generated report in its native format.
 function buildReportFile(report, allProjects) {
@@ -1287,6 +1336,7 @@ function AccountChip() {
   const store = useStore();
   const me = store.state.me;
   const [open, setOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1334,6 +1384,23 @@ function AccountChip() {
               {me.email}
             </div>
           </div>
+          {me.provider !== "auth0" && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                setPwOpen(true);
+              }}
+              className="w-full text-left px-3 py-2.5 text-[13px] border-b focus:outline-none focus-visible:ts-focus"
+              style={{ color: T.bone0, borderColor: T.ink3 }}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Lock size={12} aria-hidden="true" style={{ color: T.bone2 }} />
+                Change password
+              </span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -1351,7 +1418,166 @@ function AccountChip() {
           </button>
         </div>
       )}
+      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
     </div>
+  );
+}
+
+function ChangePasswordModal({ onClose }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [done, setDone] = useState(false);
+
+  const valid = current && next.length >= 8 && next === confirm;
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.changePassword(current, next);
+      setDone(true);
+    } catch (e) {
+      setErr(e.message || "Password change failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Change password"
+      subtitle="Local account credential rotation"
+      icon={Lock}
+      onClose={onClose}
+      footer={
+        done ? (
+          <Button variant="primary" className="ml-auto" onClick={onClose}>
+            Close
+          </Button>
+        ) : (
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" iconLeft={KeyRound} disabled={!valid || busy} onClick={submit}>
+              {busy ? "Saving…" : "Update password"}
+            </Button>
+          </>
+        )
+      }
+    >
+      {done ? (
+        <div className="flex flex-col items-center gap-3 py-4 text-center">
+          <span className="inline-flex items-center justify-center w-12 h-12 border" style={{ borderColor: T.signal }}>
+            <BadgeCheck size={24} style={{ color: T.signal }} aria-hidden="true" />
+          </span>
+          <p className="text-sm" style={{ color: T.bone0 }}>
+            Password updated. Your current session stays signed in.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <Field label="Current password">
+            <TextInput type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+          </Field>
+          <Field label="New password" hint={next && next.length < 8 ? "At least 8 characters." : undefined}>
+            <TextInput type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+          </Field>
+          <Field label="Confirm new password" hint={confirm && next !== confirm ? "Passwords don't match." : undefined}>
+            <TextInput type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+          </Field>
+          {err && (
+            <div className="px-3 py-2 border text-[12px]" style={{ borderColor: tint(T.alert, 0.4), background: tint(T.alert, 0.06), color: T.alert }}>
+              {err}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+const ACCOUNT_ROLES = [
+  { role: "Ministry Director", tier: "L4" },
+  { role: "Donor Representative", tier: "L4" },
+  { role: "Auditor", tier: "L4" },
+  { role: "Project Engineer", tier: "L3" },
+  { role: "Procurement Lead", tier: "L3" },
+  { role: "Field Inspector", tier: "L2" },
+];
+
+function AddUserModal({ onClose, onCreated }) {
+  const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState(ACCOUNT_ROLES[0].role);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const tier = ACCOUNT_ROLES.find((r) => r.role === role)?.tier || "L2";
+  const valid = /^[a-z0-9_.-]{2,40}$/i.test(username) && password.length >= 8;
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.createUser({ username: username.trim(), name: name.trim() || username.trim(), email: email.trim(), role, tier, password });
+      onCreated();
+    } catch (e) {
+      setErr(e.message || "Could not create user");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Add user account"
+      subtitle="Local credential · role-scoped access tier"
+      icon={UserCog}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" iconLeft={PlusCircle} disabled={!valid || busy} onClick={submit}>
+            {busy ? "Creating…" : "Create account"}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Username" hint={username && !/^[a-z0-9_.-]{2,40}$/i.test(username) ? "Letters, digits, _ . - only." : undefined}>
+          <TextInput value={username} onChange={(e) => setUsername(e.target.value)} placeholder="j.mwangi" autoComplete="off" />
+        </Field>
+        <Field label="Full name">
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Joseph Mwangi" />
+        </Field>
+      </div>
+      <Field label="Email">
+        <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="j.mwangi@ministry.go.ke" type="email" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Role">
+          <SelectInput value={role} onChange={setRole} options={ACCOUNT_ROLES.map((r) => r.role)} />
+        </Field>
+        <Field label="Access tier">
+          <div className="px-3 py-2 border" style={{ borderColor: T.ink3 }}>
+            <Chip size="xs" tone="info">{tier}</Chip>
+          </div>
+        </Field>
+      </div>
+      <Field label="Initial password" hint="Minimum 8 characters — the user should rotate it on first sign-in.">
+        <TextInput value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="new-password" />
+      </Field>
+      {err && (
+        <div className="px-3 py-2 border text-[12px]" style={{ borderColor: tint(T.alert, 0.4), background: tint(T.alert, 0.06), color: T.alert }}>
+          {err}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -3567,7 +3793,13 @@ function ConflictsView({ onOpenProject }) {
                   <Button size="sm" onClick={() => onOpenProject(c.pid)} iconRight={ArrowRight}>
                     Investigate
                   </Button>
-                  <Button size="sm" variant="quiet" onClick={() => store.dismissConflict(c.id, c.title, c.pid)}>
+                  <Button
+                    size="sm"
+                    variant="quiet"
+                    onClick={() => store.dismissConflict(c.id)}
+                    disabled={!canTier(store.state.me, "L4")}
+                    title={canTier(store.state.me, "L4") ? undefined : "Requires L4 access"}
+                  >
                     Dismiss
                   </Button>
                 </div>
@@ -3615,6 +3847,7 @@ function ApprovalsView({ onOpenProject }) {
   const store = useStore();
   const PROJECTS = store.state.projects;
   const APPROVALS = store.state.approvals;
+  const canApprove = canTier(store.state.me, "L4");
   const decided = Object.fromEntries(APPROVALS.filter((a) => a.decision).map((a) => [a.id, a.decision]));
   const decide = (id, choice) => store.decideApproval(id, choice);
   const queue = APPROVALS;
@@ -3689,6 +3922,8 @@ function ApprovalsView({ onOpenProject }) {
                         size="sm"
                         variant="danger"
                         onClick={() => decide(a.id, "returned")}
+                        disabled={!canApprove}
+                        title={canApprove ? undefined : "Requires L4 access"}
                       >
                         Return
                       </Button>
@@ -3697,6 +3932,8 @@ function ApprovalsView({ onOpenProject }) {
                         variant="primary"
                         onClick={() => decide(a.id, "approved")}
                         iconLeft={BadgeCheck}
+                        disabled={!canApprove}
+                        title={canApprove ? undefined : "Requires L4 access"}
                       >
                         Approve
                       </Button>
@@ -4312,6 +4549,7 @@ function ContractsView({ onOpenProject }) {
   const PROJECTS = store.state.projects;
   const CONTRACTS = store.state.contracts;
   const CHANGE_ORDERS = store.state.changeOrders;
+  const canDecideCO = canTier(store.state.me, "L4");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [newOpen, setNewOpen] = useState(false);
   const all = CONTRACTS;
@@ -4363,7 +4601,13 @@ function ContractsView({ onOpenProject }) {
                 onChange={setStatusFilter}
                 options={["ALL", "procurement", "awarded", "active", "amended", "closed"]}
               />
-              <Button variant="primary" iconLeft={PlusCircle} onClick={() => setNewOpen(true)}>
+              <Button
+                variant="primary"
+                iconLeft={PlusCircle}
+                onClick={() => setNewOpen(true)}
+                disabled={!canTier(store.state.me, "L3")}
+                title={canTier(store.state.me, "L3") ? undefined : "Requires L3 access"}
+              >
                 New contract
               </Button>
             </>
@@ -4466,10 +4710,10 @@ function ContractsView({ onOpenProject }) {
                 </span>
                 {status === "pending" && (
                   <span className="shrink-0 flex items-center gap-2">
-                    <Button size="xs" variant="danger" onClick={() => store.decideChangeOrder(c.id, "rejected")}>
+                    <Button size="xs" variant="danger" onClick={() => store.decideChangeOrder(c.id, "rejected")} disabled={!canDecideCO} title={canDecideCO ? undefined : "Requires L4 access"}>
                       Reject
                     </Button>
-                    <Button size="xs" variant="primary" iconLeft={BadgeCheck} onClick={() => store.decideChangeOrder(c.id, "approved")}>
+                    <Button size="xs" variant="primary" iconLeft={BadgeCheck} onClick={() => store.decideChangeOrder(c.id, "approved")} disabled={!canDecideCO} title={canDecideCO ? undefined : "Requires L4 access"}>
                       Approve
                     </Button>
                   </span>
@@ -4648,7 +4892,14 @@ function SignaturesView({ onOpenProject }) {
                     </td>
                     <td className="px-4 py-3 align-middle text-right">
                       {s.status === "pending" ? (
-                        <Button size="xs" variant="primary" iconLeft={Stamp} onClick={() => setTarget(s)}>
+                        <Button
+                          size="xs"
+                          variant="primary"
+                          iconLeft={Stamp}
+                          onClick={() => setTarget(s)}
+                          disabled={!canTier(store.state.me, "L3")}
+                          title={canTier(store.state.me, "L3") ? undefined : "Requires L3 access"}
+                        >
                           Sign
                         </Button>
                       ) : (
@@ -5015,7 +5266,13 @@ function ReportsView() {
                   {t.fmt} · {t.cadence}
                 </div>
               </div>
-              <Button size="xs" iconLeft={RefreshCw} onClick={() => store.generateReport(t)}>
+              <Button
+                size="xs"
+                iconLeft={RefreshCw}
+                onClick={() => store.generateReport(t)}
+                disabled={!canTier(store.state.me, "L3")}
+                title={canTier(store.state.me, "L3") ? undefined : "Requires L3 access"}
+              >
                 Generate
               </Button>
             </li>
@@ -5084,9 +5341,11 @@ function ReportsView() {
 function AccessView() {
   const store = useStore();
   const SESSIONS = store.state.users.map((u) => ({
+    username: u.username,
+    provider: u.provider || "local",
     user: u.name,
     role: `${u.role} · ${u.tier}`,
-    device: u.lastLoginAt ? "recent session" : "never",
+    device: u.provider === "auth0" ? "Auth0 identity" : u.lastLoginAt ? "local account" : "never",
     ip: "—",
     geo: u.email,
     when: u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "never signed in",
@@ -5094,7 +5353,9 @@ function AccessView() {
   }));
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [addUserOpen, setAddUserOpen] = useState(false);
   const invites = store.state.invites;
+  const isAdmin = canTier(store.state.me, "L4");
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
       {onboardOpen && (
@@ -5106,28 +5367,49 @@ function AccessView() {
           }}
         />
       )}
+      {addUserOpen && (
+        <AddUserModal
+          onClose={() => setAddUserOpen(false)}
+          onCreated={() => {
+            setAddUserOpen(false);
+            store.refresh();
+          }}
+        />
+      )}
       <div className="col-span-12" style={{ background: T.ink1 }}>
         <CardHeader
           title="Identity types"
           subtitle="User & identity layer · §6.2"
           right={
             <>
+              {isAdmin && (
+                <Button
+                  variant={confirmReset ? "danger" : "ghost"}
+                  iconLeft={RefreshCw}
+                  onClick={() => {
+                    if (confirmReset) {
+                      store.reset();
+                      setConfirmReset(false);
+                    } else {
+                      setConfirmReset(true);
+                      setTimeout(() => setConfirmReset(false), 4000);
+                    }
+                  }}
+                >
+                  {confirmReset ? "Confirm reset" : "Reset workspace"}
+                </Button>
+              )}
+              {isAdmin && (
+                <Button iconLeft={UserCog} onClick={() => setAddUserOpen(true)}>
+                  Add user
+                </Button>
+              )}
               <Button
-                variant={confirmReset ? "danger" : "ghost"}
-                iconLeft={RefreshCw}
-                onClick={() => {
-                  if (confirmReset) {
-                    store.reset();
-                    setConfirmReset(false);
-                  } else {
-                    setConfirmReset(true);
-                    setTimeout(() => setConfirmReset(false), 4000);
-                  }
-                }}
+                variant="primary"
+                iconLeft={PlusCircle}
+                onClick={() => setOnboardOpen(true)}
+                disabled={!canTier(store.state.me, "L3")}
               >
-                {confirmReset ? "Confirm reset" : "Reset workspace"}
-              </Button>
-              <Button variant="primary" iconLeft={PlusCircle} onClick={() => setOnboardOpen(true)}>
                 Onboard third party
               </Button>
             </>
@@ -5217,13 +5499,13 @@ function AccessView() {
       </div>
 
       <div className="col-span-12" style={{ background: T.ink1 }}>
-        <CardHeader title="Active sessions" subtitle="Session governance · device fingerprinting · TLS 1.3" />
+        <CardHeader title="User accounts" subtitle="Local + Auth0 identities · session governance" />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead style={{ background: T.ink2 }}>
               <tr className="border-b" style={{ borderColor: T.ink3 }}>
-                {["User", "Role", "Device", "IP", "Location", "Last seen"].map((h) => (
-                  <th key={h} scope="col" className="text-left px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
+                {["User", "Role", "Provider", "IP", "Email", "Last sign-in", ""].map((h, i) => (
+                  <th key={h || i} scope="col" className="text-left px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
                     {h}
                   </th>
                 ))}
@@ -5248,6 +5530,24 @@ function AccessView() {
                     <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.geo}</td>
                     <td className="px-4 py-3 align-middle font-mono text-[10px] tracking-widest uppercase" style={{ color: live ? T.signal : T.bone2 }}>
                       {live ? "active now" : s.when}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right">
+                      {isAdmin && !live && (
+                        <Button
+                          size="xs"
+                          variant="danger"
+                          onClick={async () => {
+                            try {
+                              await api.deleteUser(s.username);
+                              store.refresh();
+                            } catch (e) {
+                              store.notifyError(e.message);
+                            }
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -6405,9 +6705,11 @@ function GenerateBriefModal({ projects, onClose }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProject }) {
+  const __store = useStore();
+  const canCreateProject = canTier(__store.state.me, "L4");
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
-  const allProjects = PROJECTS;
+  const allProjects = __store.state.projects;
   const PageHeader = ({ title, subtitle, action }) => (
     <div className="mb-5 md:mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -6458,7 +6760,12 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
             } countries · 5 donors`}
             action={
               <div className="flex items-center gap-2">
-                <Button iconLeft={PlusCircle} onClick={() => setNewProjOpen(true)}>
+                <Button
+                  iconLeft={PlusCircle}
+                  onClick={() => setNewProjOpen(true)}
+                  disabled={!canCreateProject}
+                  title={canCreateProject ? undefined : "Requires L4 access"}
+                >
                   New project
                 </Button>
                 <Button variant="primary" iconRight={ArrowUpRight} onClick={() => setBriefOpen(true)}>
@@ -6656,6 +6963,8 @@ function LoginScreen() {
   const [err, setErr] = useState(null);
   // "checking" | "ok" | "stale" | "down"
   const [apiStatus, setApiStatus] = useState("checking");
+  // Server-side Auth0 support flag from /api/health.
+  const [apiAuth0, setApiAuth0] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -6665,6 +6974,7 @@ function LoginScreen() {
         if (cancelled) return;
         // Pre-auth server builds return health without the auth flag.
         setApiStatus(h && h.auth ? "ok" : "stale");
+        setApiAuth0(Boolean(h && h.auth0));
       } catch (e) {
         if (!cancelled) setApiStatus("down");
       }
@@ -6818,6 +7128,40 @@ function LoginScreen() {
               {!busy && apiStatus !== "down" && <ArrowRight size={12} aria-hidden="true" />}
             </button>
           </form>
+
+          {(auth0Configured || apiAuth0) && (
+            <div className="mt-5">
+              <div className="flex items-center gap-3 mb-4" aria-hidden="true">
+                <span className="flex-1 h-px" style={{ background: T.ink3 }} />
+                <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: T.bone3 }}>
+                  or
+                </span>
+                <span className="flex-1 h-px" style={{ background: T.ink3 }} />
+              </div>
+              {auth0Configured ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErr(null);
+                    auth0Login().catch((e) => setErr(e.message || "Auth0 login failed"));
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border font-mono text-[11px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus"
+                  style={{ borderColor: T.bone0, color: T.bone0, background: "transparent" }}
+                >
+                  <Fingerprint size={13} aria-hidden="true" />
+                  Continue with Auth0
+                </button>
+              ) : (
+                <p className="text-[11px] leading-relaxed" style={{ color: T.bone2 }}>
+                  The server accepts Auth0 tokens, but this front-end build is missing{" "}
+                  <code className="font-mono">VITE_AUTH0_DOMAIN</code> /{" "}
+                  <code className="font-mono">VITE_AUTH0_CLIENT_ID</code>. Add them to the
+                  environment (Vercel → Project → Settings → Environment Variables) and redeploy
+                  to enable the Auth0 button.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="p-8 md:p-10 hidden md:block" style={{ background: T.ink2 }}>
@@ -6863,8 +7207,10 @@ function LoginScreen() {
 
 function AuthGate() {
   const store = useStore();
-  const { state, authToken } = store;
-  if (!authToken) return <LoginScreen />;
+  const { state, authToken, auth0Booting } = store;
+  // Hold the splash while an Auth0 redirect callback is being completed,
+  // otherwise the login screen flashes before the session lands.
+  if (!authToken && !auth0Booting) return <LoginScreen />;
   if (!state.me) {
     // Token present but state still hydrating — render a quiet splash.
     return (

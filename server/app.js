@@ -22,7 +22,17 @@ import {
 } from "./db.js";
 import * as seed from "./seed.js";
 import * as auth from "./auth.js";
-import { requireAuth, authenticate, issueToken, findUser, listUsers } from "./auth.js";
+import {
+  requireAuth,
+  requireTier,
+  authenticate,
+  issueToken,
+  listUsers,
+  createUser,
+  deleteUser,
+  changePassword,
+  auth0Enabled,
+} from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, "..", "dist");
@@ -89,7 +99,14 @@ function pidCtx(pid) {
 // ── public routes ─────────────────────────────────────────────────────────
 
 app.get("/api/health", (req, res) =>
-  res.json({ ok: true, time: Date.now(), seeded: totalSeeded > 0, version: API_VERSION, auth: true })
+  res.json({
+    ok: true,
+    time: Date.now(),
+    seeded: totalSeeded > 0,
+    version: API_VERSION,
+    auth: true,
+    auth0: auth0Enabled(),
+  })
 );
 
 app.post(
@@ -138,6 +155,60 @@ app.get(
   wrap((req, res) => res.json(listUsers()))
 );
 
+// User management — L4 only.
+app.post(
+  "/api/auth/users",
+  requireAuth,
+  requireTier("L4"),
+  wrap((req, res) => {
+    requireFields(req.body || {}, ["username", "password", "role"]);
+    const user = createUser(req.body);
+    appendAudit(req.user, {
+      label: "APPROVAL",
+      tone: "info",
+      text: `Created account ${user.username} — ${user.role} · ${user.tier}.`,
+      hash: `0x${user.username}-created`,
+      actor: `${req.user.role} · identity admin`,
+    });
+    res.status(201).json(user);
+  })
+);
+
+app.delete(
+  "/api/auth/users/:username",
+  requireAuth,
+  requireTier("L4"),
+  wrap((req, res) => {
+    deleteUser(req.params.username, req.user.username);
+    appendAudit(req.user, {
+      label: "AMENDMENT",
+      tone: "risk",
+      text: `Revoked account ${req.params.username}.`,
+      hash: `0x${req.params.username}-revoked`,
+      actor: `${req.user.role} · identity admin`,
+    });
+    res.json({ ok: true });
+  })
+);
+
+// Self-service password change (local accounts only).
+app.post(
+  "/api/auth/password",
+  requireAuth,
+  wrap((req, res) => {
+    requireFields(req.body || {}, ["currentPassword", "newPassword"]);
+    changePassword(req.user.username, req.body.currentPassword, req.body.newPassword);
+    appendAudit(req.user, {
+      label: "APPROVAL",
+      tone: "info",
+      text: `${req.user.name} rotated their password.`,
+      hash: `0x${req.user.username}-pwrot-${Date.now().toString(16)}`,
+      actor: `${req.user.role} · identity layer`,
+    });
+    res.json({ ok: true });
+  })
+);
+
 // ── protected: state read ──────────────────────────────────────────────────
 
 app.get(
@@ -164,6 +235,7 @@ app.get(
 app.post(
   "/api/projects",
   requireAuth,
+  requireTier("L4"),
   wrap((req, res) => {
     const project = req.body;
     requireFields(project, ["id", "name", "country"]);
@@ -222,6 +294,7 @@ app.post(
 app.post(
   "/api/contracts",
   requireAuth,
+  requireTier("L3"),
   wrap((req, res) => {
     const c = req.body;
     requireFields(c, ["id", "pid", "title"]);
@@ -243,6 +316,7 @@ app.post(
 app.post(
   "/api/invites",
   requireAuth,
+  requireTier("L3"),
   wrap((req, res) => {
     const inv = req.body;
     requireFields(inv, ["id", "type", "org", "project"]);
@@ -264,6 +338,7 @@ app.post(
 app.post(
   "/api/reports/generate",
   requireAuth,
+  requireTier("L3"),
   wrap((req, res) => {
     const { template, fmt, pid = "ALL" } = req.body;
     requireFields(req.body, ["template", "fmt"]);
@@ -317,6 +392,7 @@ app.patch(
 app.patch(
   "/api/signatures/:id",
   requireAuth,
+  requireTier("L3"),
   wrap((req, res) => {
     const { status } = req.body;
     requireFields(req.body, ["status"]);
@@ -343,6 +419,7 @@ app.patch(
 app.patch(
   "/api/approvals/:id",
   requireAuth,
+  requireTier("L4"),
   wrap((req, res) => {
     const { decision } = req.body;
     requireFields(req.body, ["decision"]);
@@ -365,6 +442,7 @@ app.patch(
 app.patch(
   "/api/change-orders/:id",
   requireAuth,
+  requireTier("L4"),
   wrap((req, res) => {
     const { status } = req.body;
     requireFields(req.body, ["status"]);
@@ -387,6 +465,7 @@ app.patch(
 app.patch(
   "/api/conflicts/:id",
   requireAuth,
+  requireTier("L4"),
   wrap((req, res) => {
     const { dismissed } = req.body;
     const updated = updateRow("conflicts", req.params.id, {
@@ -412,6 +491,7 @@ app.patch(
 app.patch(
   "/api/workflows/:id",
   requireAuth,
+  requireTier("L3"),
   wrap((req, res) => {
     const updated = updateRow("workflows", req.params.id, req.body);
     if (!updated) return res.status(404).json({ error: "Not found" });
@@ -443,6 +523,7 @@ app.post(
 app.post(
   "/api/reset",
   requireAuth,
+  requireTier("L4"),
   wrap(async (req, res) => {
     resetAll();
     // Re-seed immediately so the workspace returns to a usable baseline.

@@ -10,6 +10,7 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@auth0/auth0-spa-js": "^2.21.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.6",
