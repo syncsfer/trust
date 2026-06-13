@@ -6654,6 +6654,28 @@ function LoginScreen() {
   const [password, setPassword] = useState("trustsfer-2026");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // "checking" | "ok" | "stale" | "down"
+  const [apiStatus, setApiStatus] = useState("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const h = await api.health();
+        if (cancelled) return;
+        // Pre-auth server builds return health without the auth flag.
+        setApiStatus(h && h.auth ? "ok" : "stale");
+      } catch (e) {
+        if (!cancelled) setApiStatus("down");
+      }
+    };
+    probe();
+    const t = setInterval(probe, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   const submit = async (e) => {
     e?.preventDefault?.();
@@ -6663,11 +6685,32 @@ function LoginScreen() {
     try {
       await store.login(username.trim(), password);
     } catch (e) {
-      setErr(e.message || "Sign in failed");
+      if (e.status === 404) {
+        setErr(
+          "The API server is running an outdated build without auth routes. Restart it: stop all node processes, then run `npm run dev` (or `npm start` for production)."
+        );
+      } else if (e.status === undefined || /fetch|network/i.test(e.message || "")) {
+        setErr("Cannot reach the API server. Start it with `npm run dev` (runs API + web together).");
+      } else {
+        setErr(e.message || "Sign in failed");
+      }
     } finally {
       setBusy(false);
     }
   };
+
+  const apiBanner =
+    apiStatus === "down"
+      ? {
+          tone: T.alert,
+          text: "API server unreachable. Start the full stack with `npm run dev` — it boots the API (port 3001) and the web app together.",
+        }
+      : apiStatus === "stale"
+      ? {
+          tone: T.amber,
+          text: "An outdated API server build is responding — it predates authentication. Stop it and restart with `npm run dev` or `npm start`.",
+        }
+      : null;
 
   return (
     <div
@@ -6714,6 +6757,20 @@ function LoginScreen() {
             Government-grade access to the integrity ledger. All actions are anchored, attributable, and reviewable.
           </p>
 
+          {apiBanner && (
+            <div
+              className="mt-5 px-3 py-2.5 border text-[12px] leading-relaxed"
+              style={{
+                borderColor: tint(apiBanner.tone, 0.45),
+                background: tint(apiBanner.tone, 0.07),
+                color: apiBanner.tone,
+              }}
+              role="alert"
+            >
+              {apiBanner.text}
+            </div>
+          )}
+
           <form onSubmit={submit} className="mt-7 space-y-4">
             <label className="block">
               <span className="block font-mono text-[10px] tracking-widest uppercase mb-1.5" style={{ color: T.bone2 }}>
@@ -6751,12 +6808,12 @@ function LoginScreen() {
             )}
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || apiStatus === "down"}
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border font-mono text-[11px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus disabled:opacity-60"
               style={{ background: T.signal, color: T.ink0, borderColor: T.signal }}
             >
-              {busy ? "Signing in…" : "Sign in"}
-              {!busy && <ArrowRight size={12} aria-hidden="true" />}
+              {busy ? "Signing in…" : apiStatus === "down" ? "API offline" : "Sign in"}
+              {!busy && apiStatus !== "down" && <ArrowRight size={12} aria-hidden="true" />}
             </button>
           </form>
         </div>

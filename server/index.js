@@ -24,6 +24,9 @@ import { requireAuth, authenticate, issueToken, findUser, listUsers } from "./au
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3001);
 const DIST = path.join(__dirname, "..", "dist");
+// Bumped whenever the API surface changes; the client checks this on the
+// login screen to detect a stale server process.
+const API_VERSION = 2;
 
 const app = express();
 app.use(cors());
@@ -82,7 +85,7 @@ function pidCtx(pid) {
 // ── public routes ─────────────────────────────────────────────────────────
 
 app.get("/api/health", (req, res) =>
-  res.json({ ok: true, time: Date.now(), seeded: totalSeeded > 0 })
+  res.json({ ok: true, time: Date.now(), seeded: totalSeeded > 0, version: API_VERSION, auth: true })
 );
 
 app.post(
@@ -464,6 +467,18 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || "Server error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`TrustSfer API listening on http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`TrustSfer API v${API_VERSION} listening on http://localhost:${PORT}`);
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `[api] Port ${PORT} is already in use — a stale server process is probably still running.\n` +
+        `[api] Stop it first (e.g. \`pkill -f "node server/index.js"\`) and start again,\n` +
+        `[api] otherwise the old process keeps answering requests with outdated routes (404s on /api/auth/*).`
+    );
+    process.exit(1);
+  }
+  throw err;
 });
