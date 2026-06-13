@@ -6687,10 +6687,12 @@ function LoginScreen() {
     } catch (e) {
       if (e.status === 404) {
         setErr(
-          "The API server is running an outdated build without auth routes. Restart it: stop all node processes, then run `npm run dev` (or `npm start` for production)."
+          "This page is being served by an outdated build that does not include the auth routes. Stop the current dev server (Ctrl+C) and run `npm run dev` again."
         );
       } else if (e.status === undefined || /fetch|network/i.test(e.message || "")) {
-        setErr("Cannot reach the API server. Start it with `npm run dev` (runs API + web together).");
+        setErr(
+          "Cannot reach the API on this origin. Make sure you're running `npm run dev` (or `npm start` for production) — both serve the API on the same port as the web app."
+        );
       } else {
         setErr(e.message || "Sign in failed");
       }
@@ -6703,12 +6705,12 @@ function LoginScreen() {
     apiStatus === "down"
       ? {
           tone: T.alert,
-          text: "API server unreachable. Start the full stack with `npm run dev` — it boots the API (port 3001) and the web app together.",
+          text: "The API isn't responding on this origin. Stop whatever is serving this page and run `npm run dev` from the project root — that script runs the API and the web app in the same Node process.",
         }
       : apiStatus === "stale"
       ? {
           tone: T.amber,
-          text: "An outdated API server build is responding — it predates authentication. Stop it and restart with `npm run dev` or `npm start`.",
+          text: "An outdated server is responding here — it predates the auth routes. Stop it (Ctrl+C) and run `npm run dev` (or `npm start`) from the latest checkout.",
         }
       : null;
 
