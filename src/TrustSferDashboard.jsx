@@ -2456,8 +2456,10 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
 // ════════════════════════════════════════════════════════════════════════════
 
 function OverviewView({ onOpenProject, onNavigate }) {
-  const PROJECTS = useStore().state.projects;
   const store = useStore();
+  const PROJECTS = store.state.projects;
+  const CONFLICTS = store.state.conflicts;
+  const APPROVALS = store.state.approvals;
   const all = useMemo(
     () => PROJECTS,
     [PROJECTS]
@@ -2465,7 +2467,7 @@ function OverviewView({ onOpenProject, onNavigate }) {
   const totals = useMemo(() => {
     const budget = all.reduce((s, p) => s + p.budget, 0);
     const spent = all.reduce((s, p) => s + p.spent, 0);
-    const avgI3 = all.reduce((s, p) => s + p.i3, 0) / all.length;
+    const avgI3 = all.length ? all.reduce((s, p) => s + p.i3, 0) / all.length : 0;
     const highRisk = all.filter((p) => p.risk === "high").length;
     return { budget, spent, avgI3, highRisk, count: all.length };
   }, [all]);
@@ -2772,6 +2774,10 @@ function OverviewView({ onOpenProject, onNavigate }) {
 
 function ProjectsView({ onOpenProject, extra = [] }) {
   const PROJECTS = useStore().state.projects;
+  const SECTORS = useMemo(
+    () => [...new Set(PROJECTS.map((p) => p.sector))].sort(),
+    [PROJECTS]
+  );
   const [query, setQuery] = useState("");
   const [sectorFilter, setSectorFilter] = useState("ALL");
   const [riskFilter, setRiskFilter] = useState("ALL");
@@ -3095,6 +3101,11 @@ function EvidenceView({ onOpenProject }) {
   useEffect(() => {
     setLoading(true);
     const t = setTimeout(() => {
+      if (!PROJECTS.length) {
+        setEntries([]);
+        setLoading(false);
+        return;
+      }
       const kinds = ["EVIDENCE", "APPROVAL", "PAYMENT", "MILESTONE"];
       const actors = ["Inspector", "Ministry", "Treasury", "Contractor", "Engineer", "Auditor"];
       const seeded = Array.from({ length: 28 }).map((_, i) => {
@@ -3119,7 +3130,7 @@ function EvidenceView({ onOpenProject }) {
 
   // Live append
   useEffect(() => {
-    if (reduced || loading) return;
+    if (reduced || loading || !PROJECTS.length) return;
     let n = 3000;
     const kinds = ["EVIDENCE", "APPROVAL", "PAYMENT", "MILESTONE"];
     const actors = ["Inspector", "Ministry", "Treasury", "Contractor", "Engineer"];
@@ -3571,13 +3582,17 @@ function I3AnalyticsView({ onOpenProject }) {
           subtitle="Largest I³ deltas across the portfolio"
         />
         <ul className="divide-y" style={{ borderColor: T.ink3 }}>
-          {[
-            { p: PROJECTS[3], delta: +4.2 },
-            { p: PROJECTS[2], delta: -3.8 },
-            { p: PROJECTS[8], delta: -3.1 },
-            { p: PROJECTS[5], delta: +2.4 },
-            { p: PROJECTS[10], delta: +1.9 },
-          ].map(({ p, delta }) => (
+          {PROJECTS
+            .map((p, i) => ({
+              p,
+              // Stable pseudo-delta per project so the list is deterministic
+              // and works on any portfolio size.
+              delta: Number(((((i * 53 + p.alerts * 7) % 110) - 55) / 10).toFixed(1)),
+            }))
+            .filter(({ delta }) => delta !== 0)
+            .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+            .slice(0, 5)
+            .map(({ p, delta }) => (
             <li
               key={p.id}
               className="px-5 py-3"
@@ -3605,7 +3620,7 @@ function I3AnalyticsView({ onOpenProject }) {
                 </span>
               </button>
             </li>
-          ))}
+            ))}
         </ul>
       </div>
     </div>
@@ -4267,6 +4282,7 @@ function AuditView({ onOpenProject }) {
       { label: "AMENDMENT", tone: "risk" },
     ];
     const out = [];
+    if (!PROJECTS.length) return out;
     for (let i = 0; i < 14; i++) {
       const p = PROJECTS[i % PROJECTS.length];
       const t = types[i % types.length];
@@ -5042,7 +5058,7 @@ function RiskView({ onOpenProject }) {
     return { name: r.pid, fraud: r.fraud, cls: r.cls };
   });
   const critical = RISK.filter((r) => r.cls === "critical").length;
-  const avgFraud = Math.round(RISK.reduce((s, r) => s + r.fraud, 0) / RISK.length);
+  const avgFraud = RISK.length ? Math.round(RISK.reduce((s, r) => s + r.fraud, 0) / RISK.length) : 0;
 
   return (
     <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
@@ -5138,7 +5154,7 @@ function PortalView() {
       <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
         <KPI label="Public projects" value={PROJECTS.length} sublabel="open for inspection" />
         <KPI label="Verified milestones" value={148} sublabel="evidence-backed" />
-        <KPI label="Public I³ average" value={(PROJECTS.reduce((s, p) => s + p.i3, 0) / PROJECTS.length).toFixed(1)} sublabel="redacted composite" />
+        <KPI label="Public I³ average" value={(PROJECTS.length ? PROJECTS.reduce((s, p) => s + p.i3, 0) / PROJECTS.length : 0).toFixed(1)} sublabel="redacted composite" />
         <KPI label="Citizen reports" value={36} sublabel="community feedback" />
       </div>
 
@@ -5788,7 +5804,7 @@ function UploadEvidenceModal({ onClose, onComplete, fixedProject }) {
   const PROJECTS = useStore().state.projects;
   const steps = ["Project", "Files", "Verify", "Anchor"];
   const [step, setStep] = useState(0);
-  const [pid, setPid] = useState(fixedProject || PROJECTS[0].id);
+  const [pid, setPid] = useState(fixedProject || PROJECTS[0]?.id || "");
   const [milestone, setMilestone] = useState("M-01");
   const [kind, setKind] = useState("EVIDENCE");
   const [actor, setActor] = useState("Field Inspector");
@@ -5825,8 +5841,8 @@ function UploadEvidenceModal({ onClose, onComplete, fixedProject }) {
       milestone,
       files,
       cle,
-      country: project.country,
-      flag: project.flag,
+      country: project?.country || "—",
+      flag: project?.flag || "🏳️",
       block,
     });
   };
@@ -5899,7 +5915,7 @@ function UploadEvidenceModal({ onClose, onComplete, fixedProject }) {
           </p>
           <div className="border divide-y" style={{ borderColor: T.ink3 }}>
             {[
-              ["Project", `${project.flag} ${pid}`],
+              ["Project", `${project?.flag || ""} ${pid}`.trim()],
               ["Milestone", milestone],
               ["GPS coordinates", `${lat.toFixed(2)}, ${lon.toFixed(2)}`],
               ["Timestamp", "captured just now · device clock"],
@@ -5975,14 +5991,14 @@ function OnboardModal({ onClose, onComplete }) {
   const [step, setStep] = useState(0);
   const [type, setType] = useState("Contractor");
   const [org, setOrg] = useState("");
-  const [country, setCountry] = useState(PROJECTS[0].country);
+  const [country, setCountry] = useState(PROJECTS[0]?.country || "");
   const [contact, setContact] = useState("");
   const [email, setEmail] = useState("");
   const [docs, setDocs] = useState([]);
   const [attest, setAttest] = useState(false);
   const [tax, setTax] = useState(false);
   const [role, setRole] = useState(ONBOARD_ROLES.Contractor[0]);
-  const [pid, setPid] = useState(PROJECTS[0].id);
+  const [pid, setPid] = useState(PROJECTS[0]?.id || "");
 
   useEffect(() => {
     setRole(ONBOARD_ROLES[type][0]);
@@ -6164,7 +6180,7 @@ function NewContractModal({ onClose, onComplete }) {
   const PROJECTS = useStore().state.projects;
   const steps = ["Project", "Award", "Schedule", "Review"];
   const [step, setStep] = useState(0);
-  const [pid, setPid] = useState(PROJECTS[0].id);
+  const [pid, setPid] = useState(PROJECTS[0]?.id || "");
   const [title, setTitle] = useState("");
   const [method, setMethod] = useState("ICB");
   const [contractor, setContractor] = useState(CONTRACTORS[0]);
@@ -6410,12 +6426,24 @@ const RISK_BASE_I3 = { low: 78.5, elevated: 64.0, high: 49.5, critical: 36.0 };
 
 function NewProjectModal({ onClose, onComplete }) {
   const PROJECTS = useStore().state.projects;
+  const SECTORS = useMemo(
+    () => [...new Set(PROJECTS.map((p) => p.sector))].sort(),
+    [PROJECTS]
+  );
+  const DONORS = useMemo(
+    () => [...new Set(PROJECTS.map((p) => p.donor))].sort(),
+    [PROJECTS]
+  );
+  const COUNTRIES = useMemo(
+    () => [...new Set(PROJECTS.map((p) => p.country))].sort(),
+    [PROJECTS]
+  );
   const steps = ["Identity", "Funding", "Schedule", "Review"];
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
-  const [country, setCountry] = useState(PROJECTS[0].country);
-  const [sector, setSector] = useState(SECTORS[0]);
-  const [donor, setDonor] = useState(DONORS[0]);
+  const [country, setCountry] = useState(PROJECTS[0]?.country || "");
+  const [sector, setSector] = useState(SECTORS[0] || "Roads");
+  const [donor, setDonor] = useState(DONORS[0] || "Treasury");
   const [ministry, setMinistry] = useState("");
   const [budget, setBudget] = useState("");
   const [started, setStarted] = useState("2026-02-01");
