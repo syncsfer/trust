@@ -1302,6 +1302,32 @@ function ConnectionPill() {
   );
 }
 
+// A horizontal banner used by per-project filtered list views to tell
+// the user why they're seeing a subset and how to widen back out.
+function FilterPill({ label, onClear }) {
+  return (
+    <div
+      className="px-5 md:px-6 py-2.5 border-b flex items-center gap-3 flex-wrap"
+      style={{ borderColor: T.ink3, background: tint(T.azure, 0.06) }}
+    >
+      <Filter size={11} style={{ color: T.azure }} aria-hidden="true" />
+      <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.azure }}>
+        {label}
+      </span>
+      {onClear && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-auto inline-flex items-center gap-1 font-mono text-[10px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus"
+          style={{ color: T.bone1 }}
+        >
+          Clear filter <X size={10} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Transient toast for the most recent action error (e.g. API rejected).
 function ErrorToast() {
   const store = useStore();
@@ -2403,20 +2429,30 @@ function ProjectDrawer({ projectId, extraProjects = [], onClose, onNavigate }) {
                 variant="primary"
                 size="md"
                 iconRight={ArrowUpRight}
+                onClick={() => {
+                  onNavigate("project-record", { projectId: project.id });
+                  onClose();
+                }}
               >
                 Open full record
               </Button>
               <Button
                 size="md"
                 iconLeft={Hash}
-                onClick={() => onNavigate("evidence")}
+                onClick={() => {
+                  onNavigate("evidence", { pid: project.id });
+                  onClose();
+                }}
               >
                 Evidence ledger
               </Button>
               <Button
                 size="md"
                 iconLeft={AlertTriangle}
-                onClick={() => onNavigate("conflicts")}
+                onClick={() => {
+                  onNavigate("conflicts", { pid: project.id });
+                  onClose();
+                }}
               >
                 Project conflicts
               </Button>
@@ -2772,7 +2808,7 @@ function OverviewView({ onOpenProject, onNavigate }) {
 // VIEW: PROJECTS (Data table)
 // ════════════════════════════════════════════════════════════════════════════
 
-function ProjectsView({ onOpenProject, extra = [] }) {
+function ProjectsView({ onOpenProject, onNavigate, extra = [] }) {
   const PROJECTS = useStore().state.projects;
   const SECTORS = useMemo(
     () => [...new Set(PROJECTS.map((p) => p.sector))].sort(),
@@ -2958,12 +2994,12 @@ function ProjectsView({ onOpenProject, extra = [] }) {
                   key={p.id}
                   className="ts-row border-b cursor-pointer focus-within:bg-black/[0.03]"
                   style={{ borderColor: T.ink3 }}
-                  onClick={() => onOpenProject(p.id)}
+                  onClick={() => onNavigate("project-record", { projectId: p.id })}
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      onOpenProject(p.id);
+                      onNavigate("project-record", { projectId: p.id });
                     }
                   }}
                 >
@@ -3023,7 +3059,22 @@ function ProjectsView({ onOpenProject, extra = [] }) {
                     </div>
                   </td>
                   <td className="px-4 py-3 align-middle text-right">
-                    <ChevronRight size={14} style={{ color: T.bone2 }} aria-hidden="true" />
+                    <span className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenProject(p.id);
+                        }}
+                        className="p-1 border focus:outline-none focus-visible:ts-focus"
+                        style={{ borderColor: T.ink3, color: T.bone2 }}
+                        aria-label={`Quick peek at ${p.name}`}
+                        title="Quick peek (drawer)"
+                      >
+                        <Eye size={11} aria-hidden="true" />
+                      </button>
+                      <ChevronRight size={14} style={{ color: T.bone2 }} aria-hidden="true" />
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -3087,7 +3138,7 @@ function Select({ label, value, onChange, options }) {
 // VIEW: EVIDENCE LEDGER
 // ════════════════════════════════════════════════════════════════════════════
 
-function EvidenceView({ onOpenProject }) {
+function EvidenceView({ onOpenProject, pidFilter = null, onClearFilter }) {
   const PROJECTS = useStore().state.projects;
   const reduced = usePrefersReducedMotion();
   const store = useStore();
@@ -3096,6 +3147,7 @@ function EvidenceView({ onOpenProject }) {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const pinnedProject = pidFilter ? PROJECTS.find((p) => p.id === pidFilter) : null;
 
   // Seed
   useEffect(() => {
@@ -3159,6 +3211,7 @@ function EvidenceView({ onOpenProject }) {
   }, [reduced, loading]);
 
   const filtered = [...store.state.evidence, ...entries].filter((e) => {
+    if (pidFilter && e.pid !== pidFilter) return false;
     if (filter !== "ALL" && e.kind !== filter) return false;
     const q = search.trim().toLowerCase();
     if (
@@ -3236,6 +3289,14 @@ function EvidenceView({ onOpenProject }) {
             store.addEvidence(d);
             setUploadOpen(false);
           }}
+          fixedProject={pidFilter}
+        />
+      )}
+
+      {pidFilter && (
+        <FilterPill
+          label={`Scoped to ${pinnedProject ? `${pinnedProject.flag} ${pinnedProject.name}` : pidFilter}`}
+          onClear={onClearFilter}
         />
       )}
 
@@ -3713,7 +3774,7 @@ function I3RadialGauge({ value }) {
 // VIEW: CONFLICT DETECTION
 // ════════════════════════════════════════════════════════════════════════════
 
-function ConflictsView({ onOpenProject }) {
+function ConflictsView({ onOpenProject, pidFilter = null, onClearFilter }) {
   const store = useStore();
   const PROJECTS = store.state.projects;
   const CONFLICTS = store.state.conflicts;
@@ -3722,10 +3783,12 @@ function ConflictsView({ onOpenProject }) {
   const live = CONFLICTS.filter((c) => !c.dismissed);
   const filtered = live.filter(
     (c) =>
+      (!pidFilter || c.pid === pidFilter) &&
       (sev === "ALL" || c.severity === sev) &&
       (kind === "ALL" || c.kind === kind)
   );
   const kinds = [...new Set(CONFLICTS.map((c) => c.kind))];
+  const pinnedProject = pidFilter ? PROJECTS.find((p) => p.id === pidFilter) : null;
 
   return (
     <Card>
@@ -3753,6 +3816,13 @@ function ConflictsView({ onOpenProject }) {
           <Select label="Kind" value={kind} onChange={setKind} options={["ALL", ...kinds]} />
         </div>
       </div>
+
+      {pidFilter && (
+        <FilterPill
+          label={`Scoped to ${pinnedProject ? `${pinnedProject.flag} ${pinnedProject.name}` : pidFilter}`}
+          onClear={onClearFilter}
+        />
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -4268,9 +4338,10 @@ function GeoView({ onOpenProject }) {
 // VIEW: AUDIT TRAIL
 // ════════════════════════════════════════════════════════════════════════════
 
-function AuditView({ onOpenProject }) {
+function AuditView({ onOpenProject, pidFilter = null, onClearFilter }) {
   const store = useStore();
   const PROJECTS = store.state.projects;
+  const pinnedProject = pidFilter ? PROJECTS.find((p) => p.id === pidFilter) : null;
   const [uploadOpen, setUploadOpen] = useState(false);
   const extra = store.state.auditEvents;
   const events = useMemo(() => {
@@ -4308,7 +4379,9 @@ function AuditView({ onOpenProject }) {
     return out;
   }, []);
 
-  const allEvents = [...extra, ...events];
+  const allEvents = [...extra, ...events].filter(
+    (e) => !pidFilter || e.pid === pidFilter
+  );
 
   return (
     <Card>
@@ -4346,6 +4419,13 @@ function AuditView({ onOpenProject }) {
             store.addEvidence(d);
             setUploadOpen(false);
           }}
+          fixedProject={pidFilter}
+        />
+      )}
+      {pidFilter && (
+        <FilterPill
+          label={`Scoped to ${pinnedProject ? `${pinnedProject.flag} ${pinnedProject.name}` : pidFilter}`}
+          onClear={onClearFilter}
         />
       )}
       <ol className="relative" aria-label="Audit events">
@@ -6729,10 +6809,347 @@ function GenerateBriefModal({ projects, onClose }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// VIEW: PROJECT RECORD (dedicated full page per project)
+// ════════════════════════════════════════════════════════════════════════════
+
+function ProjectRecordView({ projectId, onNavigate, onOpenProject }) {
+  const store = useStore();
+  const project = store.state.projects.find((p) => p.id === projectId);
+  const audit = useMemo(
+    () => store.state.auditEvents.filter((e) => e.pid === projectId),
+    [store.state.auditEvents, projectId]
+  );
+  const evidence = useMemo(
+    () => store.state.evidence.filter((e) => e.pid === projectId),
+    [store.state.evidence, projectId]
+  );
+  const conflicts = useMemo(
+    () => store.state.conflicts.filter((c) => c.pid === projectId),
+    [store.state.conflicts, projectId]
+  );
+  const liveConflicts = conflicts.filter((c) => !c.dismissed);
+  const contracts = useMemo(
+    () => store.state.contracts.filter((c) => c.pid === projectId),
+    [store.state.contracts, projectId]
+  );
+  const approvals = useMemo(
+    () => store.state.approvals.filter((a) => a.pid === projectId),
+    [store.state.approvals, projectId]
+  );
+  const signatures = useMemo(
+    () => store.state.signatures.filter((s) => s.pid === projectId),
+    [store.state.signatures, projectId]
+  );
+  const changeOrders = useMemo(
+    () => store.state.changeOrders.filter((c) => c.pid === projectId),
+    [store.state.changeOrders, projectId]
+  );
+
+  if (!project) {
+    return (
+      <div>
+        <div className="mb-5 md:mb-6 flex items-end justify-between gap-3">
+          <div>
+            <h1
+              className="font-serif text-2xl md:text-3xl tracking-tight leading-tight"
+              style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: T.bone0 }}
+            >
+              Project not found
+            </h1>
+            <p className="mt-1 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+              {projectId} · no record in the workspace
+            </p>
+          </div>
+          <Button onClick={() => onNavigate("projects")} iconLeft={ChevronLeft}>
+            Back to projects
+          </Button>
+        </div>
+        <EmptyState
+          icon={Inbox}
+          title="No project with this ID"
+          hint="It may have been removed, or the URL is stale."
+          action={<Button onClick={() => onNavigate("projects")}>Open the projects register</Button>}
+        />
+      </div>
+    );
+  }
+
+  const utilisation = project.budget ? Math.round((project.spent / project.budget) * 100) : 0;
+  const exportPack = () =>
+    downloadFile(
+      `audit_pack_${project.id}.pdf`,
+      makePdf(`Audit Pack — ${project.id}`, [
+        `Project: ${project.name}`,
+        `Country: ${project.country} · Sector: ${project.sector}`,
+        `Donor: ${project.donor} · Ministry: ${project.ministry}`,
+        `Budget: ${fmtUSD(project.budget)} · Spent: ${fmtUSD(project.spent)} (${utilisation}%)`,
+        `i3 Integrity Index: ${project.i3} · Risk: ${project.risk}`,
+        `Progress: ${project.progress}% · ${project.started} -> ${project.eta}`,
+        `Open alerts: ${project.alerts} · Active conflicts: ${liveConflicts.length}`,
+        `Contracts: ${contracts.length} · Change orders: ${changeOrders.length}`,
+        `Evidence anchored: ${evidence.length} · Audit events: ${audit.length}`,
+        "",
+        `Ledger anchor: ${fauxHash(`pack-${project.id}`)}`,
+      ]),
+      "application/pdf"
+    );
+
+  return (
+    <div>
+      <div className="mb-5 md:mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => onNavigate("projects")}
+            className="inline-flex items-center gap-1 font-mono text-[10px] tracking-widest uppercase mb-2 focus:outline-none focus-visible:ts-focus"
+            style={{ color: T.bone2 }}
+          >
+            <ChevronLeft size={11} aria-hidden="true" />
+            Projects
+          </button>
+          <h1
+            className="font-serif text-2xl md:text-3xl tracking-tight leading-tight"
+            style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: T.bone0 }}
+          >
+            <span aria-hidden="true" className="mr-2">{project.flag}</span>
+            {project.name}
+          </h1>
+          <p className="mt-1 font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+            {project.id} · {project.country} · {project.sector} · {project.donor}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Chip tone={i3Tone(project.i3)} size="xs">i³ {project.i3}</Chip>
+          <Chip tone={project.risk === "high" ? "risk" : project.risk === "med" ? "warn" : "verified"} size="xs">
+            risk: {project.risk}
+          </Chip>
+          <Button
+            iconLeft={Hash}
+            onClick={() => onNavigate("evidence", { pid: project.id })}
+          >
+            Evidence ledger
+          </Button>
+          <Button
+            iconLeft={AlertTriangle}
+            onClick={() => onNavigate("conflicts", { pid: project.id })}
+          >
+            Project conflicts
+          </Button>
+          <Button
+            iconLeft={FileSearch}
+            onClick={() => onNavigate("audit", { pid: project.id })}
+          >
+            Audit trail
+          </Button>
+          <Button variant="primary" iconLeft={Download} onClick={exportPack}>
+            Export audit pack
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-px" style={{ background: T.ink3 }}>
+        <div className="col-span-12 grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+          <KPI label="Budget" value={fmtUSD(project.budget)} sublabel={`disbursed ${utilisation}%`} />
+          <KPI label="Disbursed" value={fmtUSD(project.spent)} sublabel={`progress ${project.progress}%`} />
+          <KPI label="Active conflicts" value={liveConflicts.length} sublabel={`${conflicts.length - liveConflicts.length} dismissed`} />
+          <KPI label="Open approvals" value={approvals.filter((a) => !a.decision).length} sublabel={`${approvals.length} total this quarter`} />
+        </div>
+
+        <div className="col-span-12 lg:col-span-7" style={{ background: T.ink1 }}>
+          <CardHeader title="Project facts" subtitle="Hash-anchored ledger record" />
+          <ul className="px-5 md:px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              ["Ministry / agency", project.ministry],
+              ["Donor", project.donor],
+              ["Sector", project.sector],
+              ["Country", `${project.flag} ${project.country}`],
+              ["Started", project.started],
+              ["Target completion", project.eta],
+              ["Last event", project.lastEvent],
+              ["Open alerts", String(project.alerts)],
+            ].map(([k, v]) => (
+              <li key={k} className="border" style={{ borderColor: T.ink3 }}>
+                <div className="px-3 py-2.5">
+                  <MetaRow label={k} value={v} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="col-span-12 lg:col-span-5" style={{ background: T.ink1 }}>
+          <CardHeader
+            title="Latest audit events"
+            subtitle={`${audit.length} anchored`}
+            right={
+              <Button size="xs" iconRight={ArrowRight} onClick={() => onNavigate("audit", { pid: project.id })}>
+                Open audit trail
+              </Button>
+            }
+          />
+          {audit.length === 0 ? (
+            <EmptyState icon={FileSearch} title="No audit events yet" hint="Actions on this project will appear here." />
+          ) : (
+            <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+              {audit.slice(0, 6).map((e) => (
+                <li key={e.id} className="px-5 md:px-6 py-3" style={{ borderColor: T.ink3 }}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Chip tone={e.tone} size="xs">{e.label}</Chip>
+                    <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {e.ts} · {e.actor}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[13px]" style={{ color: T.bone0 }}>{e.text}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="col-span-12 lg:col-span-6" style={{ background: T.ink1 }}>
+          <CardHeader
+            title="Contracts"
+            subtitle={`${contracts.length} on this project`}
+            right={
+              <Button size="xs" iconRight={ArrowRight} onClick={() => onNavigate("contracts")}>
+                All contracts
+              </Button>
+            }
+          />
+          {contracts.length === 0 ? (
+            <EmptyState icon={FileText} title="No contracts" hint="This project hasn't been linked to any contracts yet." />
+          ) : (
+            <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+              {contracts.map((c) => (
+                <li key={c.id} className="px-5 md:px-6 py-3 flex items-center gap-3" style={{ borderColor: T.ink3 }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm truncate" style={{ color: T.bone0 }}>{c.title}</div>
+                    <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {c.id} · {c.contractor} · {c.method}
+                    </div>
+                  </div>
+                  <span className="font-mono text-[12px] tabular-nums whitespace-nowrap" style={{ color: T.bone0 }}>
+                    {fmtUSD(c.value)}
+                  </span>
+                  <Chip tone={c.status === "active" ? "verified" : c.status === "amended" ? "warn" : c.status === "closed" ? "neutral" : "plum"} size="xs">
+                    {c.status}
+                  </Chip>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="col-span-12 lg:col-span-6" style={{ background: T.ink1 }}>
+          <CardHeader
+            title="Active conflicts"
+            subtitle={`${liveConflicts.length} open`}
+            right={
+              <Button size="xs" iconRight={ArrowRight} onClick={() => onNavigate("conflicts", { pid: project.id })}>
+                Investigate
+              </Button>
+            }
+          />
+          {liveConflicts.length === 0 ? (
+            <EmptyState icon={CheckCircle2} title="No active conflicts" hint="The Conflict Detection Engine has nothing flagged on this project." />
+          ) : (
+            <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+              {liveConflicts.map((c) => (
+                <li key={c.id} className="px-5 md:px-6 py-3" style={{ borderColor: T.ink3 }}>
+                  <div className="flex items-center gap-2">
+                    <Chip tone={c.severity === "high" ? "risk" : c.severity === "med" ? "warn" : "info"} size="xs">
+                      {c.severity}
+                    </Chip>
+                    <Chip tone="plum" size="xs">{c.kind}</Chip>
+                    <span className="ml-auto font-mono text-[10px]" style={{ color: T.bone2 }}>
+                      {c.detected}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm" style={{ color: T.bone0 }}>{c.title}</p>
+                  <p className="mt-0.5 text-[12px]" style={{ color: T.bone1 }}>{c.desc}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="col-span-12 lg:col-span-6" style={{ background: T.ink1 }}>
+          <CardHeader
+            title="Recent evidence"
+            subtitle={`${evidence.length} anchored entries`}
+            right={
+              <Button size="xs" iconRight={ArrowRight} onClick={() => onNavigate("evidence", { pid: project.id })}>
+                Open evidence ledger
+              </Button>
+            }
+          />
+          {evidence.length === 0 ? (
+            <EmptyState icon={Hash} title="No evidence anchored yet" hint="Submit evidence from the ledger to populate this list." />
+          ) : (
+            <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+              {evidence.slice(0, 6).map((e) => (
+                <li key={e.id} className="px-5 md:px-6 py-3 flex items-center gap-3" style={{ borderColor: T.ink3 }}>
+                  <Chip tone="verified" size="xs">{e.kind}</Chip>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm" style={{ color: T.bone0 }}>{e.actor}</div>
+                    <code className="font-mono text-[10px] truncate block" style={{ color: T.bone2 }}>
+                      {e.hash}
+                    </code>
+                  </div>
+                  <span className="font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
+                    {e.t}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="col-span-12 lg:col-span-6" style={{ background: T.ink1 }}>
+          <CardHeader title="Approvals & signatures" subtitle={`${approvals.length + signatures.length} workflow items`} />
+          {approvals.length + signatures.length === 0 ? (
+            <EmptyState icon={CheckSquare} title="No workflow items" hint="Approvals and signature sequences for this project appear here." />
+          ) : (
+            <ul className="divide-y" style={{ borderColor: T.ink3 }}>
+              {approvals.map((a) => (
+                <li key={a.id} className="px-5 md:px-6 py-3 flex items-center gap-3" style={{ borderColor: T.ink3 }}>
+                  <Chip tone={a.decision === "approved" ? "verified" : a.decision === "returned" ? "risk" : a.priority === "high" ? "warn" : "info"} size="xs">
+                    {a.decision || a.priority}
+                  </Chip>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm truncate" style={{ color: T.bone0 }}>{a.title}</div>
+                    <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {a.id} · {a.role} · {a.sla}
+                    </div>
+                  </div>
+                </li>
+              ))}
+              {signatures.map((s) => (
+                <li key={s.id} className="px-5 md:px-6 py-3 flex items-center gap-3" style={{ borderColor: T.ink3 }}>
+                  <Chip tone={s.status === "signed" ? "verified" : s.status === "declined" ? "risk" : "warn"} size="xs">
+                    {s.status}
+                  </Chip>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm truncate" style={{ color: T.bone0 }}>{s.doc}</div>
+                    <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {s.id} · {s.role} · {s.seq}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // VIEW SWITCHER
 // ════════════════════════════════════════════════════════════════════════════
 
-function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProject }) {
+function ActiveView({ active, routeProjectId, routeQuery = {}, onOpenProject, onNavigate, extraProjects, addProject }) {
   const __store = useStore();
   const canCreateProject = canTier(__store.state.me, "L4");
   const [newProjOpen, setNewProjOpen] = useState(false);
@@ -6812,8 +7229,16 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
             title="Projects"
             subtitle="Sortable register · click a row for full record"
           />
-          <ProjectsView onOpenProject={onOpenProject} extra={extraProjects} />
+          <ProjectsView onOpenProject={onOpenProject} onNavigate={onNavigate} extra={extraProjects} />
         </>
+      );
+    case "project-record":
+      return (
+        <ProjectRecordView
+          projectId={routeProjectId}
+          onNavigate={onNavigate}
+          onOpenProject={onOpenProject}
+        />
       );
     case "evidence":
       return (
@@ -6822,7 +7247,11 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
             title="Evidence Ledger"
             subtitle="Patent #1 · Hybrid blockchain · live anchoring"
           />
-          <EvidenceView onOpenProject={onOpenProject} />
+          <EvidenceView
+            onOpenProject={onOpenProject}
+            pidFilter={routeQuery.pid || null}
+            onClearFilter={() => onNavigate("evidence")}
+          />
         </>
       );
     case "i3":
@@ -6842,7 +7271,11 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
             title="Conflict Detection"
             subtitle="Patent #3 · 6-vector anomaly engine"
           />
-          <ConflictsView onOpenProject={onOpenProject} />
+          <ConflictsView
+            onOpenProject={onOpenProject}
+            pidFilter={routeQuery.pid || null}
+            onClearFilter={() => onNavigate("conflicts")}
+          />
         </>
       );
     case "approvals":
@@ -6882,7 +7315,11 @@ function ActiveView({ active, onOpenProject, onNavigate, extraProjects, addProje
             title="Audit trail"
             subtitle="Chronological · cryptographically chained"
           />
-          <AuditView onOpenProject={onOpenProject} />
+          <AuditView
+            onOpenProject={onOpenProject}
+            pidFilter={routeQuery.pid || null}
+            onClearFilter={() => onNavigate("audit")}
+          />
         </>
       );
     case "contracts":
@@ -7265,14 +7702,44 @@ export default function TrustSferDashboard() {
   );
 }
 
+// Parse the hash into a structured route — supports
+//   #/overview                 → { view: "overview" }
+//   #/projects/RD-N4-EXP       → { view: "project-record", projectId: "RD-N4-EXP" }
+//   #/evidence?pid=RD-N4-EXP   → { view: "evidence", pid: "RD-N4-EXP" }
+const ROUTABLE_IDS = new Set(MODULES.map((m) => m.id).concat(["project-record"]));
+
+const routeFromHash = () => {
+  if (typeof window === "undefined") return { view: "overview", query: {} };
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [pathPart, queryPart] = raw.split("?");
+  const query = {};
+  if (queryPart) {
+    for (const kv of queryPart.split("&")) {
+      const [k, v] = kv.split("=");
+      if (k) query[decodeURIComponent(k)] = v ? decodeURIComponent(v) : "";
+    }
+  }
+  const [head, tail] = pathPart.split("/");
+  if (head === "projects" && tail) {
+    return { view: "project-record", projectId: tail, query };
+  }
+  if (ROUTABLE_IDS.has(head)) {
+    return { view: head, query };
+  }
+  return { view: "overview", query };
+};
+
+// Active-view id only (for the sidebar highlight, which doesn't care
+// about query params or per-project routes).
 const viewFromHash = () => {
-  const h = window.location.hash.replace(/^#\/?/, "");
-  return MODULES.some((m) => m.id === h) ? h : "overview";
+  const r = routeFromHash();
+  // "project-record" still belongs under the Projects nav entry.
+  return r.view === "project-record" ? "projects" : r.view;
 };
 
 function DashboardShell() {
   const store = useStore();
-  const [active, setActive] = useState(viewFromHash);
+  const [route, setRoute] = useState(routeFromHash);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -7280,22 +7747,34 @@ function DashboardShell() {
   const [openProjectId, setOpenProjectId] = useState(null);
   const extraProjects = store.state.projects;
 
-  // Hash routing: views are linkable and the back button works.
+  // Hash routing: views are linkable, deep-linkable, and the back button works.
   useEffect(() => {
-    const onHash = () => setActive(viewFromHash());
+    const onHash = () => setRoute(routeFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const onNavigate = useCallback((id) => {
-    setActive(id);
-    if (window.location.hash !== `#/${id}`) window.location.hash = `#/${id}`;
+  const setHash = (hash) => {
+    if (window.location.hash !== hash) window.location.hash = hash;
+  };
+
+  const onNavigate = useCallback((id, opts) => {
+    if (id === "project-record" && opts && opts.projectId) {
+      setHash(`#/projects/${opts.projectId}`);
+    } else if (opts && opts.pid) {
+      setHash(`#/${id}?pid=${encodeURIComponent(opts.pid)}`);
+    } else {
+      setHash(`#/${id}`);
+    }
     setMobileOpen(false);
   }, []);
 
   const onOpenProject = useCallback((id) => {
     setOpenProjectId(id);
   }, []);
+
+  // Active nav highlight is the module the route belongs to.
+  const active = route.view === "project-record" ? "projects" : route.view;
 
   useKey(
     { combo: { key: "k", meta: true } },
@@ -7433,7 +7912,9 @@ function DashboardShell() {
             style={{ background: T.ink0 }}
           >
             <ActiveView
-              active={active}
+              active={route.view}
+              routeProjectId={route.projectId}
+              routeQuery={route.query}
               onOpenProject={onOpenProject}
               onNavigate={onNavigate}
               extraProjects={extraProjects}
