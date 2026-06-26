@@ -1525,33 +1525,217 @@ function ChangePasswordModal({ onClose }) {
   );
 }
 
-const ACCOUNT_ROLES = [
-  { role: "Ministry Director", tier: "L4" },
-  { role: "Donor Representative", tier: "L4" },
-  { role: "Auditor", tier: "L4" },
-  { role: "Project Engineer", tier: "L3" },
-  { role: "Procurement Lead", tier: "L3" },
-  { role: "Field Inspector", tier: "L2" },
+// Pretty display metadata for tier badges.
+const TIERS_DISPLAY = [
+  { tier: "L4", label: "Administrators", tone: "verified", desc: "Approvals, change orders, conflict triage, identity management." },
+  { tier: "L3", label: "Operators",      tone: "info",     desc: "Contracts, milestones, signatures, report generation." },
+  { tier: "L2", label: "Field",          tone: "warn",     desc: "Evidence capture and inspection sign-off." },
+  { tier: "L1", label: "Observers",      tone: "plum",     desc: "Civil-society read access to non-confidential records." },
 ];
 
+// Fallback shown until the server delivers the role catalog (mirrors
+// ROLE_CATALOG in server/auth.js, kept short — the server is the truth).
+const ACCOUNT_ROLES_FALLBACK = [
+  { role: "Workspace Administrator", tier: "L4", category: "Administration", desc: "Full workspace control." },
+  { role: "Ministry Director", tier: "L4", category: "Government", desc: "Senior ministerial sign-off." },
+  { role: "Donor Representative", tier: "L4", category: "Audit & Donors", desc: "Donor oversight and sign-off." },
+  { role: "Auditor", tier: "L4", category: "Audit & Donors", desc: "Read-all, verify, export." },
+  { role: "Project Engineer", tier: "L3", category: "Project Delivery", desc: "Engineering milestone certification." },
+  { role: "Procurement Lead", tier: "L3", category: "Project Delivery", desc: "Contract awards and amendments." },
+  { role: "Field Inspector", tier: "L2", category: "Field Operations", desc: "Mobile capture and inspection." },
+];
+
+// Custom hook that fetches and caches the role catalog from the server.
+function useRoleCatalog() {
+  const [roles, setRoles] = useState(ACCOUNT_ROLES_FALLBACK);
+  useEffect(() => {
+    let cancelled = false;
+    api.listRoles().then(
+      (rs) => { if (!cancelled && Array.isArray(rs) && rs.length) setRoles(rs); },
+      () => { /* keep fallback */ }
+    );
+    return () => { cancelled = true; };
+  }, []);
+  return roles;
+}
+
+const groupRoles = (roles) => {
+  const out = {};
+  for (const r of roles) {
+    (out[r.category || "Other"] = out[r.category || "Other"] || []).push(r);
+  }
+  return out;
+};
+
+// Shared selection card for picking from a long catalog.
+function RoleCard({ role, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(role.role)}
+      className="w-full text-left p-3 border focus:outline-none focus-visible:ts-focus"
+      style={{
+        borderColor: selected ? T.signal : T.ink3,
+        background: selected ? tint(T.signal, 0.08) : "transparent",
+      }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm" style={{ color: T.bone0 }}>{role.role}</span>
+        <Chip size="xs" tone={role.tier === "L4" ? "verified" : role.tier === "L3" ? "info" : role.tier === "L2" ? "warn" : "neutral"}>
+          {role.tier}
+        </Chip>
+      </div>
+      {role.desc && (
+        <p className="mt-1 text-[11px] leading-snug" style={{ color: T.bone2 }}>{role.desc}</p>
+      )}
+    </button>
+  );
+}
+
+// Tristate project selector: ALL / specific list. Used by AddUserModal
+// step 3 and the ManageUserModal access tab.
+function ProjectScopePicker({ value, onChange }) {
+  const PROJECTS = useStore().state.projects;
+  const allMode = value === "ALL";
+  const selected = Array.isArray(value) ? value : [];
+  const toggle = (pid) =>
+    onChange(
+      selected.includes(pid) ? selected.filter((x) => x !== pid) : [...selected, pid]
+    );
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button
+          type="button"
+          onClick={() => onChange("ALL")}
+          className="px-3 py-1.5 border font-mono text-[10px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus"
+          style={{
+            borderColor: allMode ? T.signal : T.ink3,
+            background: allMode ? tint(T.signal, 0.1) : "transparent",
+            color: allMode ? T.signal : T.bone1,
+          }}
+        >
+          All projects
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(selected.length ? selected : [])}
+          className="px-3 py-1.5 border font-mono text-[10px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus"
+          style={{
+            borderColor: !allMode ? T.signal : T.ink3,
+            background: !allMode ? tint(T.signal, 0.1) : "transparent",
+            color: !allMode ? T.signal : T.bone1,
+          }}
+        >
+          Selected projects ({selected.length})
+        </button>
+        {!allMode && (
+          <>
+            <button
+              type="button"
+              onClick={() => onChange(PROJECTS.map((p) => p.id))}
+              className="ml-auto font-mono text-[10px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus"
+              style={{ color: T.bone2 }}
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="font-mono text-[10px] tracking-widest uppercase focus:outline-none focus-visible:ts-focus"
+              style={{ color: T.bone2 }}
+            >
+              Clear
+            </button>
+          </>
+        )}
+      </div>
+      {allMode ? (
+        <div
+          className="px-3 py-3 border text-[12px] leading-relaxed"
+          style={{ borderColor: tint(T.azure, 0.3), background: tint(T.azure, 0.05), color: T.bone1 }}
+        >
+          Full portfolio access — this user will see every project in the workspace, including projects added later.
+        </div>
+      ) : (
+        <ul
+          className="grid grid-cols-1 md:grid-cols-2 gap-px max-h-[240px] overflow-y-auto border"
+          style={{ background: T.ink3, borderColor: T.ink3 }}
+        >
+          {PROJECTS.map((p) => {
+            const on = selected.includes(p.id);
+            return (
+              <li key={p.id} style={{ background: T.ink1 }}>
+                <button
+                  type="button"
+                  onClick={() => toggle(p.id)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left focus:outline-none focus-visible:ts-focus"
+                >
+                  <span
+                    className="w-4 h-4 shrink-0 flex items-center justify-center border"
+                    style={{
+                      borderColor: on ? T.signal : T.ink4,
+                      background: on ? T.signal : "transparent",
+                    }}
+                    aria-hidden="true"
+                  >
+                    {on && <CheckCircle2 size={11} style={{ color: T.ink1 }} />}
+                  </span>
+                  <span aria-hidden="true">{p.flag}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] truncate" style={{ color: T.bone0 }}>{p.name}</div>
+                    <div className="font-mono text-[9px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      {p.id} · {p.sector}
+                    </div>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// 4-step wizard for creating a user account.
 function AddUserModal({ onClose, onCreated }) {
+  const steps = ["Identity", "Role", "Access", "Review"];
+  const roles = useRoleCatalog();
+  const [step, setStep] = useState(0);
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState(ACCOUNT_ROLES[0].role);
+  const [role, setRole] = useState(roles[0]?.role || "Field Inspector");
+  const [allowedProjects, setAllowedProjects] = useState("ALL");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
-  const tier = ACCOUNT_ROLES.find((r) => r.role === role)?.tier || "L2";
-  const valid = /^[a-z0-9_.-]{2,40}$/i.test(username) && password.length >= 8;
+  const tier = roles.find((r) => r.role === role)?.tier || "L2";
+  const grouped = useMemo(() => groupRoles(roles), [roles]);
+  const usernameOk = /^[a-z0-9_.-]{2,40}$/i.test(username);
+  const canStep = [
+    () => usernameOk && name.trim().length > 0,
+    () => Boolean(role),
+    () => true,
+    () => password.length >= 8,
+  ][step];
 
   const submit = async () => {
-    if (!valid || busy) return;
+    if (busy) return;
     setBusy(true);
     setErr(null);
     try {
-      await api.createUser({ username: username.trim(), name: name.trim() || username.trim(), email: email.trim(), role, tier, password });
+      await api.createUser({
+        username: username.trim(),
+        name: name.trim() || username.trim(),
+        email: email.trim(),
+        role,
+        tier,
+        password,
+        allowedProjects,
+      });
       onCreated();
     } catch (e) {
       setErr(e.message || "Could not create user");
@@ -1562,44 +1746,296 @@ function AddUserModal({ onClose, onCreated }) {
   return (
     <Modal
       title="Add user account"
-      subtitle="Local credential · role-scoped access tier"
+      subtitle={`Step ${step + 1} of ${steps.length} · ${steps[step]}`}
       icon={UserCog}
       onClose={onClose}
+      wide
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" iconLeft={PlusCircle} disabled={!valid || busy} onClick={submit}>
-            {busy ? "Creating…" : "Create account"}
+          <Button onClick={step === 0 ? onClose : () => setStep((s) => s - 1)} iconLeft={ChevronLeft}>
+            {step === 0 ? "Cancel" : "Back"}
           </Button>
+          {step < steps.length - 1 ? (
+            <Button
+              variant="primary"
+              iconRight={ArrowRight}
+              disabled={!canStep()}
+              onClick={() => canStep() && setStep((s) => s + 1)}
+            >
+              Continue
+            </Button>
+          ) : (
+            <Button variant="primary" iconLeft={PlusCircle} disabled={!canStep() || busy} onClick={submit}>
+              {busy ? "Creating…" : "Create account"}
+            </Button>
+          )}
         </>
       }
     >
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Username" hint={username && !/^[a-z0-9_.-]{2,40}$/i.test(username) ? "Letters, digits, _ . - only." : undefined}>
-          <TextInput value={username} onChange={(e) => setUsername(e.target.value)} placeholder="j.mwangi" autoComplete="off" />
-        </Field>
-        <Field label="Full name">
-          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Joseph Mwangi" />
-        </Field>
-      </div>
-      <Field label="Email">
-        <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="j.mwangi@ministry.go.ke" type="email" />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Role">
-          <SelectInput value={role} onChange={setRole} options={ACCOUNT_ROLES.map((r) => r.role)} />
-        </Field>
-        <Field label="Access tier">
-          <div className="px-3 py-2 border" style={{ borderColor: T.ink3 }}>
-            <Chip size="xs" tone="info">{tier}</Chip>
+      <StepDots steps={steps} current={step} />
+
+      {step === 0 && (
+        <div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Username"
+              hint={username && !usernameOk ? "2–40 chars, letters/digits/_./- only." : "Used for sign-in; lowercase recommended."}
+            >
+              <TextInput value={username} onChange={(e) => setUsername(e.target.value)} placeholder="j.mwangi" autoComplete="off" />
+            </Field>
+            <Field label="Full name">
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Joseph Mwangi" />
+            </Field>
           </div>
-        </Field>
+          <Field label="Email" hint="Where account recovery & MFA prompts will be sent.">
+            <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="j.mwangi@ministry.go.ke" type="email" />
+          </Field>
+        </div>
+      )}
+
+      {step === 1 && (
+        <div>
+          <p className="text-xs mb-4" style={{ color: T.bone2 }}>
+            Roles determine which actions a user can take. The badge shows the resulting access tier.
+            L4 can approve, L3 can act on projects, L2 is field-only, L1/L0 read-only.
+          </p>
+          {Object.entries(grouped).map(([cat, rs]) => (
+            <div key={cat} className="mb-4">
+              <h4 className="font-mono text-[10px] tracking-widest uppercase mb-2" style={{ color: T.bone2 }}>
+                {cat}
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {rs.map((r) => (
+                  <RoleCard key={r.role} role={r} selected={role === r.role} onSelect={setRole} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {step === 2 && (
+        <div>
+          <p className="text-xs mb-4" style={{ color: T.bone2 }}>
+            Pick which projects this user can see. They will only see records (evidence, conflicts, contracts, audit, etc.)
+            that belong to projects in their scope. You can change this anytime from the Access view.
+          </p>
+          <ProjectScopePicker value={allowedProjects} onChange={setAllowedProjects} />
+        </div>
+      )}
+
+      {step === 3 && (
+        <div>
+          <Field label="Initial password" hint="At least 8 characters. The user can rotate it from the account menu after first sign-in.">
+            <TextInput value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="new-password" />
+          </Field>
+          <div className="mt-4 border divide-y" style={{ borderColor: T.ink3 }}>
+            {[
+              ["Username", username || "—"],
+              ["Name", name || "—"],
+              ["Email", email || "—"],
+              ["Role · tier", `${role} · ${tier}`],
+              ["Project access", allowedProjects === "ALL" ? "All projects (current + future)" : `${allowedProjects.length} project${allowedProjects.length === 1 ? "" : "s"}`],
+            ].map(([k, v]) => (
+              <div key={k} className="px-3 py-2.5">
+                <MetaRow label={k} value={v} />
+              </div>
+            ))}
+          </div>
+          {err && (
+            <div
+              className="mt-4 px-3 py-2 border text-[12px]"
+              style={{ borderColor: tint(T.alert, 0.4), background: tint(T.alert, 0.06), color: T.alert }}
+            >
+              {err}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// Edit existing user: role/tier, project access, and revoke. Surfaces the
+// admin self-lockout guard the server enforces.
+function ManageUserModal({ username, onClose, onChanged }) {
+  const store = useStore();
+  const roles = useRoleCatalog();
+  const user = store.state.users.find((u) => u.username === username);
+  const [tab, setTab] = useState("role"); // "role" | "access" | "danger"
+  const [role, setRole] = useState(user?.role || "");
+  const [allowedProjects, setAllowedProjects] = useState(user?.allowedProjects ?? "ALL");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const isSelf = user?.username === store.state.me?.username;
+  const isAdmin = user?.role === "Workspace Administrator";
+  const tier = roles.find((r) => r.role === role)?.tier || user?.tier || "L2";
+  const grouped = useMemo(() => groupRoles(roles), [roles]);
+
+  if (!user) return null;
+
+  const save = async (patch) => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.updateUser(user.username, patch);
+      onChanged();
+    } catch (e) {
+      setErr(e.message || "Could not update user");
+      setBusy(false);
+    }
+  };
+
+  const revoke = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.deleteUser(user.username);
+      onChanged();
+    } catch (e) {
+      setErr(e.message || "Could not revoke user");
+      setBusy(false);
+    }
+  };
+
+  const tabBtn = (id, label) => (
+    <button
+      type="button"
+      key={id}
+      onClick={() => setTab(id)}
+      className="px-3 py-2 font-mono text-[10px] tracking-widest uppercase border focus:outline-none focus-visible:ts-focus"
+      style={{
+        borderColor: tab === id ? T.signal : T.ink3,
+        background: tab === id ? tint(T.signal, 0.08) : "transparent",
+        color: tab === id ? T.signal : T.bone1,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <Modal
+      title={`Manage ${user.name}`}
+      subtitle={`${user.username} · ${user.role} · ${user.tier}${user.provider === "auth0" ? " · Auth0" : ""}`}
+      icon={UserCog}
+      onClose={onClose}
+      wide
+      footer={
+        tab === "danger" ? (
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button
+              variant="danger"
+              iconLeft={X}
+              disabled={busy || isSelf}
+              onClick={revoke}
+              title={isSelf ? "You cannot revoke your own account" : undefined}
+            >
+              Revoke account
+            </Button>
+          </>
+        ) : tab === "role" ? (
+          <>
+            <Button onClick={onClose}>Close</Button>
+            <Button
+              variant="primary"
+              iconLeft={BadgeCheck}
+              disabled={busy || role === user.role}
+              onClick={() => save({ role })}
+            >
+              {busy ? "Saving…" : "Update role"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button onClick={onClose}>Close</Button>
+            <Button
+              variant="primary"
+              iconLeft={BadgeCheck}
+              disabled={busy}
+              onClick={() => save({ allowedProjects })}
+            >
+              {busy ? "Saving…" : "Save project access"}
+            </Button>
+          </>
+        )
+      }
+    >
+      <div className="flex items-center gap-2 mb-5">
+        {tabBtn("role", "Role & tier")}
+        {tabBtn("access", "Project access")}
+        {tabBtn("danger", "Danger")}
       </div>
-      <Field label="Initial password" hint="Minimum 8 characters — the user should rotate it on first sign-in.">
-        <TextInput value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="new-password" />
-      </Field>
+
+      {tab === "role" && (
+        <div>
+          <div className="mb-3 px-3 py-2.5 border flex items-center gap-3 flex-wrap" style={{ borderColor: T.ink3 }}>
+            <div className="flex-1">
+              <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone2 }}>Current</div>
+              <div className="text-sm" style={{ color: T.bone0 }}>{user.role}</div>
+            </div>
+            <Chip size="xs" tone="info">{user.tier}</Chip>
+          </div>
+          {Object.entries(grouped).map(([cat, rs]) => (
+            <div key={cat} className="mb-4">
+              <h4 className="font-mono text-[10px] tracking-widest uppercase mb-2" style={{ color: T.bone2 }}>
+                {cat}
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {rs.map((r) => (
+                  <RoleCard key={r.role} role={r} selected={role === r.role} onSelect={setRole} />
+                ))}
+              </div>
+            </div>
+          ))}
+          {role !== user.role && (
+            <p className="text-[12px]" style={{ color: T.bone1 }}>
+              Tier will change from <b>{user.tier}</b> to <b>{tier}</b>.
+            </p>
+          )}
+        </div>
+      )}
+
+      {tab === "access" && (
+        <div>
+          {isAdmin && (
+            <div
+              className="mb-3 px-3 py-2 border text-[11px]"
+              style={{ borderColor: tint(T.amber, 0.4), background: tint(T.amber, 0.06), color: T.amber }}
+            >
+              Workspace Administrators always see the full portfolio. The server rejects attempts to narrow their scope.
+            </div>
+          )}
+          <ProjectScopePicker value={allowedProjects} onChange={setAllowedProjects} />
+        </div>
+      )}
+
+      {tab === "danger" && (
+        <div>
+          <p className="text-[13px] mb-3" style={{ color: T.bone1 }}>
+            Revoking removes the account, signs out any active sessions, and prevents future access.
+            The audit trail of past actions is preserved.
+          </p>
+          {isSelf && (
+            <p className="text-[12px] mb-3" style={{ color: T.alert }}>
+              You cannot revoke your own account.
+            </p>
+          )}
+          {!isSelf && isAdmin && (
+            <p className="text-[12px] mb-3" style={{ color: T.amber }}>
+              This is a Workspace Administrator. Make sure another L4 admin exists before revoking.
+            </p>
+          )}
+        </div>
+      )}
+
       {err && (
-        <div className="px-3 py-2 border text-[12px]" style={{ borderColor: tint(T.alert, 0.4), background: tint(T.alert, 0.06), color: T.alert }}>
+        <div
+          className="mt-4 px-3 py-2 border text-[12px]"
+          style={{ borderColor: tint(T.alert, 0.4), background: tint(T.alert, 0.06), color: T.alert }}
+        >
           {err}
         </div>
       )}
@@ -5436,20 +5872,35 @@ function ReportsView() {
 
 function AccessView() {
   const store = useStore();
+  const roles = useRoleCatalog();
+  const groupedRoles = useMemo(() => groupRoles(roles), [roles]);
+  const projectCount = store.state.projects.length;
+  const usersByRole = useMemo(() => {
+    const m = {};
+    for (const u of store.state.users) m[u.role] = (m[u.role] || 0) + 1;
+    return m;
+  }, [store.state.users]);
+
+  const formatScope = (u) =>
+    u.role === "Workspace Administrator" || u.allowedProjects === "ALL"
+      ? "All projects"
+      : `${(u.allowedProjects || []).length} of ${projectCount}`;
+
   const SESSIONS = store.state.users.map((u) => ({
     username: u.username,
     provider: u.provider || "local",
     user: u.name,
     role: `${u.role} · ${u.tier}`,
+    scope: formatScope(u),
     device: u.provider === "auth0" ? "Auth0 identity" : u.lastLoginAt ? "local account" : "never",
-    ip: "—",
-    geo: u.email,
+    email: u.email,
     when: u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "never signed in",
     isMe: u.username === store.state.me?.username,
   }));
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
+  const [manageUser, setManageUser] = useState(null);
   const invites = store.state.invites;
   const isAdmin = canTier(store.state.me, "L4");
   return (
@@ -5472,10 +5923,20 @@ function AccessView() {
           }}
         />
       )}
+      {manageUser && (
+        <ManageUserModal
+          username={manageUser}
+          onClose={() => setManageUser(null)}
+          onChanged={() => {
+            setManageUser(null);
+            store.refresh();
+          }}
+        />
+      )}
       <div className="col-span-12" style={{ background: T.ink1 }}>
         <CardHeader
-          title="Identity types"
-          subtitle="User & identity layer · §6.2"
+          title="Access & Identity"
+          subtitle="Role catalog · project scoping · session governance"
           right={
             <>
               {isAdmin && (
@@ -5511,18 +5972,29 @@ function AccessView() {
             </>
           }
         />
-        <ul className="grid grid-cols-1 md:grid-cols-5 gap-px" style={{ background: T.ink3 }}>
-          {IDENTITY_TYPES.map((it) => (
-            <li key={it.type} className="p-5" style={{ background: T.ink1 }}>
-              <it.icon size={18} style={{ color: T.signal }} aria-hidden="true" />
-              <div className="mt-3 font-serif text-xl tabular-nums" style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: T.bone0 }}>
-                {it.count}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: T.ink3 }}>
+          {TIERS_DISPLAY.map((t) => {
+            const count = store.state.users.filter((u) => u.tier === t.tier).length;
+            return (
+              <div key={t.tier} className="p-5" style={{ background: T.ink1 }}>
+                <span
+                  className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-widest uppercase"
+                  style={{ color: T.bone2 }}
+                >
+                  <Chip size="xs" tone={t.tone}>{t.tier}</Chip>
+                  {t.label}
+                </span>
+                <div
+                  className="mt-3 font-serif text-2xl tabular-nums"
+                  style={{ fontFamily: "Fraunces, serif", fontWeight: 380, color: T.bone0 }}
+                >
+                  {isAdmin ? count : "—"}
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed" style={{ color: T.bone2 }}>{t.desc}</p>
               </div>
-              <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: T.bone1 }}>{it.type}</div>
-              <p className="mt-2 text-[11px] leading-relaxed" style={{ color: T.bone2 }}>{it.ex}</p>
-            </li>
-          ))}
-        </ul>
+            );
+          })}
+        </div>
       </div>
 
       {invites.length > 0 && (
@@ -5548,31 +6020,40 @@ function AccessView() {
       )}
 
       <div className="col-span-12 lg:col-span-7" style={{ background: T.ink1 }}>
-        <CardHeader title="Role-based access control" subtitle="RBAC + ABAC · document & milestone level" />
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead style={{ background: T.ink2 }}>
-              <tr className="border-b" style={{ borderColor: T.ink3 }}>
-                {["Role", "Tier", "Users", "Scope"].map((h) => (
-                  <th key={h} scope="col" className={`px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap ${h === "Users" ? "text-right" : "text-left"}`} style={{ color: T.bone2 }}>
-                    {h}
-                  </th>
+        <CardHeader
+          title="Role catalog"
+          subtitle={`${roles.length} roles · grouped by function`}
+        />
+        <div className="px-5 md:px-6 py-4 space-y-5">
+          {Object.entries(groupedRoles).map(([cat, rs]) => (
+            <div key={cat}>
+              <h4 className="font-mono text-[10px] tracking-widest uppercase mb-2" style={{ color: T.bone2 }}>
+                {cat}
+              </h4>
+              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {rs.map((r) => (
+                  <li
+                    key={r.role}
+                    className="border px-3 py-2.5"
+                    style={{ borderColor: T.ink3 }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[13px]" style={{ color: T.bone0 }}>{r.role}</span>
+                      <span className="flex items-center gap-2">
+                        <Chip size="xs" tone={r.tier === "L4" ? "verified" : r.tier === "L3" ? "info" : r.tier === "L2" ? "warn" : "neutral"}>
+                          {r.tier}
+                        </Chip>
+                        <span className="font-mono text-[10px] tabular-nums" style={{ color: T.bone2 }}>
+                          {usersByRole[r.role] || 0}
+                        </span>
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-snug" style={{ color: T.bone2 }}>{r.desc}</p>
+                  </li>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {RBAC_ROLES.map((r) => (
-                <tr key={r.role} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
-                  <td className="px-4 py-3 align-middle" style={{ color: T.bone0 }}>{r.role}</td>
-                  <td className="px-4 py-3 align-middle">
-                    <Chip size="xs" tone={r.tier === "L4" ? "verified" : r.tier === "L0" ? "neutral" : "info"}>{r.tier}</Chip>
-                  </td>
-                  <td className="px-4 py-3 align-middle text-right font-mono tabular-nums" style={{ color: T.bone1 }}>{r.users}</td>
-                  <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{r.scope}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              </ul>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -5595,12 +6076,15 @@ function AccessView() {
       </div>
 
       <div className="col-span-12" style={{ background: T.ink1 }}>
-        <CardHeader title="User accounts" subtitle="Local + Auth0 identities · session governance" />
+        <CardHeader
+          title="User accounts"
+          subtitle={`${SESSIONS.length} account${SESSIONS.length === 1 ? "" : "s"} · click "Manage" to change role or project access`}
+        />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead style={{ background: T.ink2 }}>
               <tr className="border-b" style={{ borderColor: T.ink3 }}>
-                {["User", "Role", "Provider", "IP", "Email", "Last sign-in", ""].map((h, i) => (
+                {["User", "Role", "Provider", "Project access", "Email", "Last sign-in", ""].map((h, i) => (
                   <th key={h || i} scope="col" className="text-left px-4 py-3 font-mono text-[10px] tracking-widest uppercase whitespace-nowrap" style={{ color: T.bone2 }}>
                     {h}
                   </th>
@@ -5611,7 +6095,7 @@ function AccessView() {
               {SESSIONS.map((s) => {
                 const live = s.isMe;
                 return (
-                  <tr key={s.user + s.geo} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
+                  <tr key={s.username} className="ts-row border-b" style={{ borderColor: T.ink3 }}>
                     <td className="px-4 py-3 align-middle" style={{ color: T.bone0 }}>
                       {s.user}
                       {live && (
@@ -5619,29 +6103,29 @@ function AccessView() {
                           you
                         </span>
                       )}
+                      <div className="font-mono text-[10px]" style={{ color: T.bone2 }}>{s.username}</div>
                     </td>
                     <td className="px-4 py-3 align-middle font-mono text-[11px] tracking-widest uppercase" style={{ color: T.bone1 }}>{s.role}</td>
-                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.device}</td>
-                    <td className="px-4 py-3 align-middle font-mono text-[11px]" style={{ color: T.bone2 }}>{s.ip}</td>
-                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.geo}</td>
+                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>
+                      <Chip size="xs" tone={s.provider === "auth0" ? "plum" : "neutral"}>
+                        {s.provider === "auth0" ? "Auth0" : "Local"}
+                      </Chip>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: s.scope === "All projects" ? T.signal : T.bone1 }}>
+                      {s.scope}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-[13px]" style={{ color: T.bone2 }}>{s.email}</td>
                     <td className="px-4 py-3 align-middle font-mono text-[10px] tracking-widest uppercase" style={{ color: live ? T.signal : T.bone2 }}>
                       {live ? "active now" : s.when}
                     </td>
                     <td className="px-4 py-3 align-middle text-right">
-                      {isAdmin && !live && (
+                      {isAdmin && (
                         <Button
                           size="xs"
-                          variant="danger"
-                          onClick={async () => {
-                            try {
-                              await api.deleteUser(s.username);
-                              store.refresh();
-                            } catch (e) {
-                              store.notifyError(e.message);
-                            }
-                          }}
+                          iconLeft={UserCog}
+                          onClick={() => setManageUser(s.username)}
                         >
-                          Revoke
+                          Manage
                         </Button>
                       )}
                     </td>
@@ -7414,10 +7898,13 @@ function ActiveView({ active, routeProjectId, routeQuery = {}, onOpenProject, on
 // Demo credentials surfaced in the login screen so an operator can sign
 // in without prior context. Mirrors SEED_USERS in server/seed.js.
 const DEMO_CREDENTIALS = [
-  { username: "admin", password: "trustsfer-2026", role: "Auditor · L4" },
-  { username: "ministry", password: "ministry-2026", role: "Ministry · L4" },
-  { username: "inspector", password: "inspector-2026", role: "Inspector · L2" },
-  { username: "donor", password: "donor-2026", role: "Donor · L4" },
+  { username: "admin",     password: "trustsfer-2026", role: "Workspace Admin · L4", scope: "All projects" },
+  { username: "ministry",  password: "ministry-2026",  role: "Ministry Director · L4", scope: "All projects" },
+  { username: "donor",     password: "donor-2026",     role: "Donor Rep · L4", scope: "USAID portfolio" },
+  { username: "engineer",  password: "engineer-2026",  role: "Project Engineer · L3", scope: "LATAM projects" },
+  { username: "treasury",  password: "treasury-2026",  role: "Treasury Officer · L3", scope: "All projects" },
+  { username: "inspector", password: "inspector-2026", role: "Field Inspector · L2", scope: "East Africa" },
+  { username: "observer",  password: "observer-2026",  role: "Civil Observer · L1", scope: "All projects" },
 ];
 
 function LoginScreen() {
@@ -7660,6 +8147,11 @@ function LoginScreen() {
                   <code className="block mt-0.5 font-mono text-[10px]" style={{ color: T.bone3 }}>
                     {c.password}
                   </code>
+                  {c.scope && (
+                    <div className="mt-0.5 font-mono text-[9px] tracking-widest uppercase" style={{ color: T.bone2 }}>
+                      scope: {c.scope}
+                    </div>
+                  )}
                 </button>
               </li>
             ))}

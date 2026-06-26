@@ -106,16 +106,26 @@ export const SEED_LEDGER = [
 
 // Demo user accounts. Passwords are hashed at seed time, not stored
 // in plaintext. Roles map to RBAC tiers in the front-end.
+// Helpers for the seed scopes so each demo account demonstrates a
+// different access slice. Filters are by donor, ministry, or sector.
+const PIDS_FOR_DONOR = (donor) =>
+  SEED_PROJECTS.filter((p) => p.donor === donor).map((p) => p.id);
+const PIDS_FOR_COUNTRIES = (countries) =>
+  SEED_PROJECTS.filter((p) => countries.includes(p.country)).map((p) => p.id);
+
 export const SEED_USERS = [
+  // Admin sees everything.
   {
     username: "admin",
     name: "Sarah Ramírez",
     initials: "SR",
     email: "admin@trustsfer.gov",
-    role: "Auditor",
+    role: "Workspace Administrator",
     tier: "L4",
     password: "trustsfer-2026",
+    allowedProjects: "ALL",
   },
+  // Ministry Director sees the projects of her country group.
   {
     username: "ministry",
     name: "Farah Haddad",
@@ -124,7 +134,9 @@ export const SEED_USERS = [
     role: "Ministry Director",
     tier: "L4",
     password: "ministry-2026",
+    allowedProjects: "ALL",
   },
+  // Inspector is scoped to East Africa field assignments.
   {
     username: "inspector",
     name: "Mary Otieno",
@@ -133,7 +145,9 @@ export const SEED_USERS = [
     role: "Field Inspector",
     tier: "L2",
     password: "inspector-2026",
+    allowedProjects: PIDS_FOR_COUNTRIES(["Kenya", "Tanzania", "Ghana", "Nigeria"]),
   },
+  // Donor representative sees only the donor's portfolio.
   {
     username: "donor",
     name: "USAID Monitor",
@@ -142,5 +156,39 @@ export const SEED_USERS = [
     role: "Donor Representative",
     tier: "L4",
     password: "donor-2026",
+    allowedProjects: PIDS_FOR_DONOR("USAID"),
+  },
+  // Project engineer for the LATAM Roads & Energy projects.
+  {
+    username: "engineer",
+    name: "Luis Moreno",
+    initials: "LM",
+    email: "engineer@trustsfer.gov",
+    role: "Project Engineer",
+    tier: "L3",
+    password: "engineer-2026",
+    allowedProjects: PIDS_FOR_COUNTRIES(["Colombia", "Mexico", "Peru", "Dominican Republic"]),
+  },
+  // Treasury officer with portfolio-wide visibility.
+  {
+    username: "treasury",
+    name: "Kofi Bello",
+    initials: "KB",
+    email: "treasury@trustsfer.gov",
+    role: "Treasury Officer",
+    tier: "L3",
+    password: "treasury-2026",
+    allowedProjects: "ALL",
+  },
+  // Public observer with read-only baseline access.
+  {
+    username: "observer",
+    name: "Civil Society Observer",
+    initials: "CS",
+    email: "observer@civicobservatory.org",
+    role: "Civil Society Observer",
+    tier: "L1",
+    password: "observer-2026",
+    allowedProjects: "ALL",
   },
 ];

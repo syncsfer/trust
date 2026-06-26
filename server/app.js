@@ -29,16 +29,20 @@ import {
   issueToken,
   listUsers,
   createUser,
+  updateUser,
   deleteUser,
   changePassword,
   auth0Enabled,
+  canSeeProject,
+  isWorkspaceAdmin,
+  ROLE_CATALOG,
 } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, "..", "dist");
 // Bumped whenever the API surface changes; the client checks this on the
 // login screen to detect a stale server process.
-export const API_VERSION = 3;
+export const API_VERSION = 4;
 
 const app = express();
 app.use(cors());
@@ -174,6 +178,25 @@ app.post(
   })
 );
 
+app.patch(
+  "/api/auth/users/:username",
+  requireAuth,
+  requireTier("L4"),
+  wrap((req, res) => {
+    const before = req.user;
+    const updated = updateUser(req.params.username, req.body || {});
+    const changedKeys = Object.keys(req.body || {}).join(", ");
+    appendAudit(req.user, {
+      label: "AMENDMENT",
+      tone: "info",
+      text: `Updated account ${updated.username} (${changedKeys}) — now ${updated.role} · ${updated.tier}.`,
+      hash: `0x${updated.username}-updated-${Date.now().toString(16)}`,
+      actor: `${before.role} · identity admin`,
+    });
+    res.json(updated);
+  })
+);
+
 app.delete(
   "/api/auth/users/:username",
   requireAuth,
@@ -189,6 +212,13 @@ app.delete(
     });
     res.json({ ok: true });
   })
+);
+
+// Static role catalog so the client renders consistent descriptions.
+app.get(
+  "/api/auth/roles",
+  requireAuth,
+  wrap((req, res) => res.json(ROLE_CATALOG))
 );
 
 // Self-service password change (local accounts only).
@@ -211,11 +241,45 @@ app.post(
 
 // ── protected: state read ──────────────────────────────────────────────────
 
+// Project-scoped collections — rows are hidden when the signed-in user's
+// allowedProjects doesn't include the row's pid. Portfolio-wide rows
+// (pid === "ALL" or missing) stay visible.
+const PROJECT_SCOPED = new Set([
+  "projects", "contracts", "evidence", "auditEvents", "conflicts",
+  "approvals", "signatures", "changeOrders", "workflows", "ledger",
+  "invites", "reports",
+]);
+
+function scopeSnapshotFor(user) {
+  const snap = snapshot();
+  if (isWorkspaceAdmin(user) || user.allowedProjects === "ALL") return snap;
+  const allowed = new Set(user.allowedProjects || []);
+  const scoped = {};
+  for (const [key, rows] of Object.entries(snap)) {
+    if (!PROJECT_SCOPED.has(key) || !Array.isArray(rows)) {
+      scoped[key] = rows;
+      continue;
+    }
+    scoped[key] = rows.filter((r) => {
+      if (key === "projects") return allowed.has(r.id);
+      if (!r.pid || r.pid === "ALL") return true; // portfolio-wide
+      return allowed.has(r.pid);
+    });
+  }
+  return scoped;
+}
+
 app.get(
   "/api/state",
   requireAuth,
   wrap((req, res) => {
-    res.json({ ...snapshot(), me: req.user, users: listUsers() });
+    res.json({
+      ...scopeSnapshotFor(req.user),
+      me: req.user,
+      // Only L4 users can see the user roster (otherwise the list would
+      // leak account names + emails).
+      users: req.user.tier === "L4" ? listUsers() : [req.user],
+    });
   })
 );
 

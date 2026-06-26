@@ -27,54 +27,141 @@ function loadOrCreateSecret() {
 const SECRET = loadOrCreateSecret();
 const TOKEN_TTL = "7d";
 
-export const TIERS = ["L0", "L2", "L3", "L4"];
+export const TIERS = ["L0", "L1", "L2", "L3", "L4"];
 export const tierRank = (t) => TIERS.indexOf(t);
-export const ROLE_TIERS = {
-  "Ministry Director": "L4",
-  "Donor Representative": "L4",
-  Auditor: "L4",
-  "Project Engineer": "L3",
-  "Procurement Lead": "L3",
-  "Field Inspector": "L2",
-  "Public Viewer": "L0",
-};
+
+// The canonical role catalog. The Admin tier (L4) has full workspace
+// control. Lower tiers narrow what the user can do (see requireTier on
+// each endpoint) AND what they can see (server filters /api/state to
+// rows whose pid is in the user's allowed_projects list — except L4,
+// which always sees the full workspace).
+//
+// `category` groups roles in the Access view's role catalog UI.
+export const ROLE_CATALOG = [
+  // ── Administration ─────────────────────────────────────────────────
+  { role: "Workspace Administrator", tier: "L4", category: "Administration",
+    desc: "Owns the workspace. Creates accounts, sets project access, can sign and approve at any layer." },
+  { role: "Identity Administrator", tier: "L4", category: "Administration",
+    desc: "Manages user provisioning, role assignment, and project scoping. Cannot edit project records." },
+
+  // ── Government / Ministry ──────────────────────────────────────────
+  { role: "Ministry Director", tier: "L4", category: "Government",
+    desc: "Senior ministerial sign-off on certifications, amendments, and disbursements." },
+  { role: "Treasury Officer", tier: "L3", category: "Government",
+    desc: "Authorizes payment tranches against verified milestones." },
+  { role: "Finance Controller", tier: "L3", category: "Government",
+    desc: "Reconciles disbursements with budget envelopes and donor commitments." },
+  { role: "Compliance Officer", tier: "L3", category: "Government",
+    desc: "Reviews policy adherence, dual-control, and anti-corruption attestations." },
+
+  // ── Audit & Donor oversight ────────────────────────────────────────
+  { role: "Auditor", tier: "L4", category: "Audit & Donors",
+    desc: "Read-all access, evidence verification, and audit pack export." },
+  { role: "Donor Representative", tier: "L4", category: "Audit & Donors",
+    desc: "Disbursement sign-off and project oversight for the donor's portfolio." },
+  { role: "Donor Programme Officer", tier: "L3", category: "Audit & Donors",
+    desc: "Day-to-day donor liaison; reviews milestones and approves tranches." },
+
+  // ── Project delivery ───────────────────────────────────────────────
+  { role: "Project Manager", tier: "L3", category: "Project Delivery",
+    desc: "End-to-end project ownership: schedule, contractors, milestones, escalation." },
+  { role: "Project Engineer", tier: "L3", category: "Project Delivery",
+    desc: "Certifies engineering milestones and reviews technical evidence." },
+  { role: "Procurement Lead", tier: "L3", category: "Project Delivery",
+    desc: "Manages contract awards, amendments, and change orders." },
+
+  // ── Field operations ──────────────────────────────────────────────
+  { role: "Site Supervisor", tier: "L2", category: "Field Operations",
+    desc: "Supervises contractor crews and signs off daily progress reports." },
+  { role: "Field Inspector", tier: "L2", category: "Field Operations",
+    desc: "Mobile capture of site evidence; first-line milestone verification." },
+  { role: "Third-party Inspector", tier: "L2", category: "Field Operations",
+    desc: "Independent technical inspection commissioned by donor or government." },
+
+  // ── External / read-only ──────────────────────────────────────────
+  { role: "Civil Society Observer", tier: "L1", category: "External Observers",
+    desc: "Read-only access to non-confidential records and the transparency portal." },
+  { role: "Public Viewer", tier: "L0", category: "External Observers",
+    desc: "Redacted citizen view — open milestones, headline budgets, no PII." },
+];
+
+export const ROLE_TIERS = Object.fromEntries(ROLE_CATALOG.map((r) => [r.role, r.tier]));
+export const ROLE_DESCRIPTIONS = Object.fromEntries(ROLE_CATALOG.map((r) => [r.role, r.desc]));
+export const ROLE_CATEGORIES = Object.fromEntries(ROLE_CATALOG.map((r) => [r.role, r.category]));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    username      TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    initials      TEXT NOT NULL,
-    email         TEXT NOT NULL,
-    role          TEXT NOT NULL,
-    tier          TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    provider      TEXT NOT NULL DEFAULT 'local',
-    created_at    INTEGER NOT NULL,
-    last_login_at INTEGER
+    username         TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    initials         TEXT NOT NULL,
+    email            TEXT NOT NULL,
+    role             TEXT NOT NULL,
+    tier             TEXT NOT NULL,
+    password_hash    TEXT NOT NULL,
+    provider         TEXT NOT NULL DEFAULT 'local',
+    allowed_projects TEXT NOT NULL DEFAULT '"ALL"',
+    created_at       INTEGER NOT NULL,
+    last_login_at    INTEGER
   );
 `);
-// Older databases predate the provider column.
-try {
-  db.exec("ALTER TABLE users ADD COLUMN provider TEXT NOT NULL DEFAULT 'local'");
-} catch (e) {
-  /* column already exists */
+// Migrations for older databases.
+for (const m of [
+  "ALTER TABLE users ADD COLUMN provider TEXT NOT NULL DEFAULT 'local'",
+  `ALTER TABLE users ADD COLUMN allowed_projects TEXT NOT NULL DEFAULT '"ALL"'`,
+]) {
+  try { db.exec(m); } catch (e) { /* column already exists */ }
 }
 
 const stmts = {
   insertUser: db.prepare(
-    "INSERT OR IGNORE INTO users (username, name, initials, email, role, tier, password_hash, provider, created_at) " +
-      "VALUES (@username, @name, @initials, @email, @role, @tier, @password_hash, @provider, @created_at)"
+    "INSERT OR IGNORE INTO users (username, name, initials, email, role, tier, password_hash, provider, allowed_projects, created_at) " +
+      "VALUES (@username, @name, @initials, @email, @role, @tier, @password_hash, @provider, @allowed_projects, @created_at)"
   ),
   getUser: db.prepare("SELECT * FROM users WHERE username = ?"),
   touchLogin: db.prepare("UPDATE users SET last_login_at = ? WHERE username = ?"),
   setPassword: db.prepare("UPDATE users SET password_hash = ? WHERE username = ?"),
   setProfile: db.prepare("UPDATE users SET name = ?, email = ? WHERE username = ?"),
+  setRole: db.prepare("UPDATE users SET role = ?, tier = ? WHERE username = ?"),
+  setAccess: db.prepare("UPDATE users SET allowed_projects = ? WHERE username = ?"),
   deleteUser: db.prepare("DELETE FROM users WHERE username = ?"),
   listUsers: db.prepare(
-    "SELECT username, name, initials, email, role, tier, provider, last_login_at FROM users ORDER BY username"
+    "SELECT username, name, initials, email, role, tier, provider, allowed_projects, last_login_at FROM users ORDER BY username"
   ),
   countTier: db.prepare("SELECT COUNT(*) AS n FROM users WHERE tier = 'L4'"),
 };
+
+// Parse the stored allowed_projects blob. "ALL" → wildcard sentinel,
+// missing or malformed → "ALL" so we never accidentally lock a user out.
+function parseAccess(raw) {
+  if (raw === undefined || raw === null) return "ALL";
+  try {
+    const v = JSON.parse(raw);
+    if (v === "ALL") return "ALL";
+    if (Array.isArray(v)) return v.filter((s) => typeof s === "string");
+    return "ALL";
+  } catch (e) {
+    return "ALL";
+  }
+}
+
+function serializeAccess(value) {
+  if (value === "ALL" || value === null || value === undefined) return JSON.stringify("ALL");
+  if (!Array.isArray(value)) return JSON.stringify("ALL");
+  return JSON.stringify(value.filter((s) => typeof s === "string"));
+}
+
+// Workspace Administrators always see the full workspace; other roles
+// (including L4 donor/ministry/auditor) respect their allowedProjects.
+export const isWorkspaceAdmin = (user) => user && user.role === "Workspace Administrator";
+
+// Wildcard ("ALL") OR explicit project id list.
+export function canSeeProject(user, pid) {
+  if (!user) return false;
+  if (isWorkspaceAdmin(user)) return true;
+  if (user.allowedProjects === "ALL") return true;
+  if (!pid || pid === "ALL") return true; // portfolio-wide rows
+  return Array.isArray(user.allowedProjects) && user.allowedProjects.includes(pid);
+}
 
 const initialsOf = (name) =>
   String(name)
@@ -94,13 +181,14 @@ function publicUser(row) {
     role: row.role,
     tier: row.tier,
     provider: row.provider || "local",
+    allowedProjects: parseAccess(row.allowed_projects),
     lastLoginAt: row.last_login_at || null,
   };
 }
 
 // ── local accounts ─────────────────────────────────────────────────────────
 
-export function ensureUserSeeded({ username, name, initials, email, role, tier, password }) {
+export function ensureUserSeeded({ username, name, initials, email, role, tier, password, allowedProjects }) {
   stmts.insertUser.run({
     username,
     name,
@@ -110,11 +198,12 @@ export function ensureUserSeeded({ username, name, initials, email, role, tier, 
     tier,
     password_hash: bcrypt.hashSync(password, 10),
     provider: "local",
+    allowed_projects: serializeAccess(allowedProjects ?? "ALL"),
     created_at: Date.now(),
   });
 }
 
-export function createUser({ username, name, email, role, tier, password }) {
+export function createUser({ username, name, email, role, tier, password, allowedProjects }) {
   if (!/^[a-z0-9_.-]{2,40}$/i.test(username || "")) {
     const err = new Error("Username must be 2-40 chars (letters, digits, _ . -)");
     err.status = 400;
@@ -130,6 +219,11 @@ export function createUser({ username, name, email, role, tier, password }) {
     err.status = 409;
     throw err;
   }
+  if (role && !ROLE_TIERS[role]) {
+    const err = new Error(`Unknown role: ${role}`);
+    err.status = 400;
+    throw err;
+  }
   const resolvedTier = TIERS.includes(tier) ? tier : ROLE_TIERS[role] || "L2";
   stmts.insertUser.run({
     username,
@@ -140,8 +234,59 @@ export function createUser({ username, name, email, role, tier, password }) {
     tier: resolvedTier,
     password_hash: bcrypt.hashSync(password, 10),
     provider: "local",
+    allowed_projects: serializeAccess(allowedProjects ?? "ALL"),
     created_at: Date.now(),
   });
+  return findUser(username);
+}
+
+// Server-side guard: a Workspace Administrator cannot self-restrict
+// their visible scope, and the last L4 admin cannot lose admin status.
+function guardSelfLockout(target, patch) {
+  if (!isWorkspaceAdmin(target)) return;
+  if (patch.allowedProjects !== undefined && patch.allowedProjects !== "ALL") {
+    const err = new Error("Workspace Administrators cannot restrict their own project scope");
+    err.status = 400;
+    throw err;
+  }
+}
+
+// L4 admins use this to amend any combination of profile/role/scope.
+// Only the keys present in the patch are touched.
+export function updateUser(username, patch) {
+  const row = stmts.getUser.get(username);
+  if (!row) {
+    const err = new Error("User not found");
+    err.status = 404;
+    throw err;
+  }
+  guardSelfLockout(publicUser(row), patch);
+  if (patch.role !== undefined && patch.role !== row.role) {
+    if (!ROLE_TIERS[patch.role]) {
+      const err = new Error(`Unknown role: ${patch.role}`);
+      err.status = 400;
+      throw err;
+    }
+    // If the role's canonical tier changed and they're being demoted from
+    // L4, make sure another L4 admin still exists.
+    const nextTier = ROLE_TIERS[patch.role];
+    if (row.tier === "L4" && nextTier !== "L4" && stmts.countTier.get().n <= 1) {
+      const err = new Error("Cannot demote the last L4 administrator");
+      err.status = 400;
+      throw err;
+    }
+    stmts.setRole.run(patch.role, nextTier, username);
+  }
+  if (patch.name !== undefined || patch.email !== undefined) {
+    const next = {
+      name: patch.name !== undefined ? patch.name : row.name,
+      email: patch.email !== undefined ? patch.email : row.email,
+    };
+    stmts.setProfile.run(next.name, next.email, username);
+  }
+  if (patch.allowedProjects !== undefined) {
+    stmts.setAccess.run(serializeAccess(patch.allowedProjects), username);
+  }
   return findUser(username);
 }
 
